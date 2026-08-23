@@ -828,17 +828,25 @@
   async function excluirCliente() {
     const c = await DB.db.clientes.get(state.clienteId);
     if (!c) return go('clientes');
-    const vendasCliente = await DB.db.vendas.where('clienteId').equals(c.id).count();
-    if (vendasCliente > 0) {
-      return U.toast(
-        `Este cliente tem ${vendasCliente} venda(s) no histórico — use "desativar" para preservar os registros.`,
-        'erro'
-      );
-    }
-    const ok = await U.confirmar(
+    const r = await U.promptDialog(
       'Excluir cliente',
-      `Excluir <b>${U.esc(c.nome)}</b> definitivamente?<br><small class="muted">Sem histórico de vendas, a exclusão é segura.</small>`,
-      'Excluir'
+      `<label class="field"><span>Senha de administrador</span>
+        <input name="senha" type="password" inputmode="numeric" autocomplete="off" placeholder="••••••"></label>`,
+      'Continuar'
+    );
+    if (!r) return;
+    if (r.senha !== SENHA_EXCLUIR_DIARIA) {
+      return U.toast('Senha incorreta.', 'erro');
+    }
+    const vendasCliente = await DB.db.vendas.where('clienteId').equals(c.id).count();
+    const aviso =
+      vendasCliente > 0
+        ? `<br><small class="muted">Este cliente tem ${vendasCliente} venda(s) no histórico — elas permanecem nos relatórios como "Removido".</small>`
+        : '<br><small class="muted">Sem histórico de vendas, a exclusão é segura.</small>';
+    const ok = await U.confirmar(
+      'Apagar definitivamente',
+      `Excluir <b>${U.esc(c.nome)}</b>?${aviso}`,
+      'Apagar'
     );
     if (!ok) return;
     await DB.db.clientes.delete(c.id);

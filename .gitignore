@@ -1,1 +1,5 @@
 gerar_zip.sh
+.DS_Store
+Thumbs.db
+*.log
+node_modules/
