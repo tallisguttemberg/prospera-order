@@ -25,7 +25,7 @@
 
   const SENHA_EXCLUIR_DIARIA = '150619';
 
-  const VERSAO = '1.0.2';
+  const VERSAO = '1.0.3';
 
   async function init() {
     try {
@@ -787,6 +787,7 @@
       : { nome: '', telefone: '', endereco: '', bairro: '', pontoRef: '', ativo: 1 };
     const campos = `
       <label class="field"><span>Nome do estabelecimento *</span><input name="nome" value="${U.esc(c.nome)}" placeholder="Ex: Mercado Central"></label>
+      <label class="field"><span>Responsável pela compra *</span><input name="responsavel" value="${U.esc(c.responsavel || '')}" placeholder="Ex: João Silva"></label>
       <label class="field"><span>Telefone / WhatsApp *</span><input name="telefone" value="${U.esc(c.telefone || '')}" inputmode="tel" placeholder="(88) 90000-0000"></label>
       <div class="grid-2">
         <label class="field"><span>Bairro *</span><input name="bairro" value="${U.esc(c.bairro || '')}" placeholder="Ex: Centro"></label>
@@ -807,6 +808,7 @@
     );
     if (!r) return;
     if (!r.nome.trim()) return U.toast('O nome do estabelecimento é obrigatório.', 'erro');
+    if (!r.responsavel.trim()) return U.toast('O nome do responsável pela compra é obrigatório.', 'erro');
     const telDigitos = r.telefone.replace(/\D/g, '');
     if (!telDigitos) return U.toast('O telefone é obrigatório.', 'erro');
     if (telDigitos.length < 10) return U.toast('Telefone incompleto — digite DDD + número.', 'erro');
@@ -814,6 +816,7 @@
     if (!r.endereco.trim()) return U.toast('O endereço é obrigatório.', 'erro');
     const dados = {
       nome: r.nome.trim(),
+      responsavel: r.responsavel.trim(),
       telefone: r.telefone.trim(),
       endereco: r.endereco.trim(),
       bairro: r.bairro.trim(),
@@ -882,6 +885,7 @@
             <button class="link danger" onclick="App.excluirCliente()">🗑 excluir</button>
           </div>
         </div>
+        ${c.responsavel ? `<p>👤 Resp.: ${U.esc(c.responsavel)}</p>` : ''}
         ${c.telefone ? `<p>📞 ${U.esc(U.fmtTelefone(c.telefone))}</p>` : ''}
         ${c.bairro || c.pontoRef ? `<p class="muted">📍 ${U.esc([c.bairro, c.pontoRef].filter(Boolean).join(' — '))}</p>` : ''}
         ${c.endereco ? `<p class="muted">🏠 ${U.esc(c.endereco)}</p>` : ''}

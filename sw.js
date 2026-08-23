@@ -1,4 +1,4 @@
-const CACHE = 'prospera-order-v20';
+const CACHE = 'prospera-order-v21';
 const ARQUIVOS = [
   './',
   './index.html',
