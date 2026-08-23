@@ -13,7 +13,6 @@
   };
 
   const TITULOS = {
-    home: 'Prospera Order',
     diaria: 'Diária',
     clientes: 'Clientes',
     cliente: 'Cliente',
@@ -22,7 +21,11 @@
     ajustes: 'Ajustes',
   };
 
+  const SLOGAN = 'Anote. Venda. Prospere.';
+
   const SENHA_EXCLUIR_DIARIA = '150619';
+
+  const VERSAO = '1.0.2';
 
   async function init() {
     try {
@@ -74,7 +77,11 @@
   async function render() {
     const view = document.getElementById('view');
     document.getElementById('subtitulo').textContent =
-      state.view === 'cliente' ? 'Cliente' : TITULOS[state.view] || '';
+      state.view === 'home'
+        ? SLOGAN
+        : state.view === 'cliente'
+          ? 'Cliente'
+          : TITULOS[state.view] || '';
     document.getElementById('btnVoltar').hidden = state.view !== 'cliente' && state.view !== 'ajustes';
     setTabAtiva();
     window.scrollTo(0, 0);
@@ -818,6 +825,27 @@
     render();
   }
 
+  async function excluirCliente() {
+    const c = await DB.db.clientes.get(state.clienteId);
+    if (!c) return go('clientes');
+    const vendasCliente = await DB.db.vendas.where('clienteId').equals(c.id).count();
+    if (vendasCliente > 0) {
+      return U.toast(
+        `Este cliente tem ${vendasCliente} venda(s) no histórico — use "desativar" para preservar os registros.`,
+        'erro'
+      );
+    }
+    const ok = await U.confirmar(
+      'Excluir cliente',
+      `Excluir <b>${U.esc(c.nome)}</b> definitivamente?<br><small class="muted">Sem histórico de vendas, a exclusão é segura.</small>`,
+      'Excluir'
+    );
+    if (!ok) return;
+    await DB.db.clientes.delete(c.id);
+    U.toast('Cliente excluído. 🗑');
+    go('clientes');
+  }
+
   async function renderClienteDetalhe(el) {
     const c = await DB.db.clientes.get(state.clienteId);
     if (!c) return go('clientes');
@@ -843,6 +871,7 @@
           <div>
             <button class="link" onclick="App.formCliente(${c.id})">editar</button>
             <button class="link danger" onclick="App.toggleCliente(${c.id},${c.ativo ? 0 : 1})">${c.ativo ? 'desativar' : 'ativar'}</button>
+            <button class="link danger" onclick="App.excluirCliente()">🗑 excluir</button>
           </div>
         </div>
         ${c.telefone ? `<p>📞 ${U.esc(U.fmtTelefone(c.telefone))}</p>` : ''}
@@ -1052,7 +1081,7 @@
         <h3>💬 Suporte</h3>
         <a class="btn ghost block" style="text-decoration:none" href="https://wa.me/5588993132963?text=Ol%C3%A1%21%20Preciso%20de%20suporte%20no%20Prospera%20Order." target="_blank" rel="noopener noreferrer">Falar no WhatsApp</a>
       </div>
-      <p class="center muted small">Prospera Order · v1.0.0</p>`;
+      <p class="center muted small">Prospera Order · v${U.esc(VERSAO)}</p>`;
   }
 
   async function salvarNome(v) {
@@ -1084,7 +1113,7 @@
     salvarDevolucoes, apagarDevolucao,
     fecharDia, reabrirDia, copiarResumo, compartilharFornecedor, whatsappFornecedor, copiarFornecedor,
     excluirDiaria,
-    buscar, formCliente, toggleCliente,
+    buscar, formCliente, toggleCliente, excluirCliente,
     formProduto, toggleProduto, excluirProduto,
     trocarMes, exportarCsv,
     fazerBackup, importarBackup, salvarNome, snapshotAgora, restaurarSnapshot, excluirSnapshot,
