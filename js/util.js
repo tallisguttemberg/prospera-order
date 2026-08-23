@@ -42,6 +42,22 @@
     return `${d}/${m}`;
   }
 
+  function mascaraTelefone(valor) {
+    const d = String(valor || '').replace(/\D/g, '').slice(0, 11);
+    if (!d) return '';
+    if (d.length <= 2) return `(${d}`;
+    if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+    if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+    return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+  }
+
+  function fmtTelefone(raw) {
+    const d = String(raw || '').replace(/\D/g, '');
+    if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+    if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+    return raw || '';
+  }
+
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;')
@@ -75,7 +91,7 @@
     });
   }
 
-  function promptDialog(titulo, camposHtml, botaoOk) {
+  function promptDialog(titulo, camposHtml, botaoOk, aoAbrir) {
     return new Promise((resolve) => {
       const d = document.getElementById('dlg');
       d.innerHTML = `
@@ -86,6 +102,7 @@
           <button class="btn primary" id="dlgSim">${esc(botaoOk || 'Salvar')}</button>
         </div>`;
       d.showModal();
+      if (aoAbrir) aoAbrir(d);
       d.querySelector('#dlgNao').onclick = () => { d.close(); resolve(null); };
       d.querySelector('#dlgSim').onclick = () => {
         const dados = {};
@@ -96,7 +113,7 @@
     });
   }
 
-  root.Util = {
+  const api = {
     fmtMoeda,
     parseMoedaParaCentavos,
     hojeISO,
@@ -104,9 +121,14 @@
     fmtData,
     fmtDataCurta,
     fmtDataHora,
+    fmtTelefone,
+    mascaraTelefone,
     esc,
     toast,
     confirmar,
     promptDialog,
   };
-})(self);
+
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  else root.Util = api;
+})(typeof self !== 'undefined' ? self : this);

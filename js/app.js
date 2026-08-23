@@ -22,6 +22,8 @@
     ajustes: 'Ajustes',
   };
 
+  const SENHA_EXCLUIR_DIARIA = '150619';
+
   async function init() {
     try {
       if (!root.Dexie || !root.DB || !root.Calc) {
@@ -160,15 +162,47 @@
   }
 
   async function abrirDiaria() {
-    const aberta = await DB.diariaAberta();
-    if (aberta) return U.toast('Já existe uma diária aberta.', 'erro');
-    try {
-      await DB.db.diarias.add({ data: U.hojeISO(), status: 'aberta', abertaEm: Date.now(), fechadaEm: null });
+    const hoje = U.hojeISO();
+    const doDia = await DB.db.diarias.where('data').equals(hoje).first();
+
+    if (doDia && doDia.status === 'aberta') {
       state.qtdVenda = {};
-      go('diaria');
-    } catch (e) {
-      U.toast('Já existe uma diária nessa data.', 'erro');
+      go('diaria', { diaIdAberto: doDia.id });
+      return;
     }
+
+    const presas = (await DB.db.diarias.where('status').equals('aberta').toArray()).filter(
+      (d) => d.data !== hoje
+    );
+    if (presas.length) {
+      const datas = [...new Set(presas.map((d) => U.fmtData(d.data)))].join(', ');
+      const ok = await U.confirmar(
+        'Diária anterior ficou aberta',
+        `Existe diária de <b>${U.esc(datas)}</b> ainda em aberto.<br><small class="muted">Fechar agora para iniciar a de hoje? Você confere os números depois em Relatórios.</small>`,
+        'Fechar e iniciar hoje'
+      );
+      if (!ok) return;
+      await DB.db.diarias.bulkUpdate(
+        presas.map((d) => ({ key: d.id, changes: { status: 'fechada', fechadaEm: Date.now() } }))
+      );
+    }
+
+    if (doDia && doDia.status === 'fechada') {
+      const ok = await U.confirmar(
+        'Diária de hoje já foi fechada',
+        'Reabrir a diária de hoje para fazer novos lançamentos?',
+        'Reabrir'
+      );
+      if (!ok) return;
+      await DB.db.diarias.update(doDia.id, { status: 'aberta', fechadaEm: null });
+      state.qtdVenda = {};
+      go('diaria', { diaIdAberto: doDia.id });
+      return;
+    }
+
+    await DB.db.diarias.add({ data: hoje, status: 'aberta', abertaEm: Date.now(), fechadaEm: null });
+    state.qtdVenda = {};
+    go('diaria');
   }
 
   async function verDia(id) {
@@ -461,6 +495,16 @@
               <td class="${p.restante < 0 ? 'erro' : p.restante > 0 ? 'alerta' : 'ok'}">${p.restante}</td>
             </tr>`).join('')}
         </table>
+      </div>
+      <div class="card">
+        <h3>📤 Enviar ao fornecedor</h3>
+        ${vendas.length ? `
+          <p class="muted small">Pedido do dia detalhado por cliente, com bairro, referência e contato.</p>
+          <button class="btn primary block" onclick="App.compartilharFornecedor()">📤 Compartilhar pedido</button>
+          <div class="row-gap">
+            <button class="btn ghost small" onclick="App.whatsappFornecedor()">WhatsApp</button>
+            <button class="btn ghost small" onclick="App.copiarFornecedor()">📋 Copiar</button>
+          </div>` : '<p class="muted">Registre vendas para gerar o pedido.</p>'}
       </div>`;
     if (dia.status === 'aberta') {
       html += `
@@ -476,6 +520,11 @@
           </div>
         </div>`;
     }
+    html += `
+      <div class="card">
+        <button class="btn danger ghost block" style="margin-top:0" onclick="App.excluirDiaria()">🗑 Excluir esta diária</button>
+        <p class="muted small center">Solicita senha de administrador.</p>
+      </div>`;
     box.innerHTML = html;
   }
 
@@ -496,8 +545,185 @@
     await renderDiaTab();
   }
 
-  async function copiarResumo() {
+  let textoFornecedorAtual = '';
+
+  async function montarTextoFornecedor() {
     const dia = await DB.db.diarias.get(state.diaIdAberto);
+    const { cargas, vendas, devolucoes } = await DB.dadosDiaria(dia.id);
+    if (!vendas.length && !cargas.length) {
+      U.toast('Nada registrado nesta diária ainda.', 'erro');
+      return null;
+    }
+    const [todosProdutos, todosClientes] = await Promise.all([
+      DB.db.produtos.toArray(),
+      DB.db.clientes.toArray(),
+    ]);
+    const prodMap = new Map(todosProdutos.map((p) => [p.id, p]));
+    const cliMap = new Map(todosClientes.map((c) => [c.id, c]));
+
+    const detalheCaixas = (un, produto) => {
+      if (!produto || !produto.unidPorCaixa || produto.unidPorCaixa <= 1) return '';
+      const cx = Math.floor(un / produto.unidPorCaixa);
+      const avulsas = un % produto.unidPorCaixa;
+      if (cx && avulsas) return ` (${cx} caixa${cx > 1 ? 's' : ''} + ${avulsas} un)`;
+      if (cx) return ` (${cx} caixa${cx > 1 ? 's' : ''})`;
+      return ' (avulsas)';
+    };
+
+    const agrupar = (lista) => {
+      const m = new Map();
+      for (const item of lista) m.set(item.produtoId, (m.get(item.produtoId) || 0) + item.unidades);
+      return m;
+    };
+    const estoqueMap = agrupar(cargas);
+    const devMap = agrupar(devolucoes);
+
+    let arrecadadoCentavos = 0;
+    let ganhoCentavos = 0;
+
+    const linhas = [
+      `📦 PEDIDO DO DIA — ${U.fmtData(dia.data)}`,
+      'Prospera Order',
+      '',
+    ];
+
+    const porCliente = new Map();
+    for (const v of vendas) {
+      porCliente.set(v.clienteId, [...(porCliente.get(v.clienteId) || []), v]);
+      arrecadadoCentavos += v.unidades * v.valorUnitCentavos;
+      ganhoCentavos += v.unidades * v.comissaoUnitCentavos;
+    }
+
+    for (const [clienteId, vs] of porCliente) {
+      const c = cliMap.get(clienteId) || {};
+      linhas.push(`🏪 ${c.nome || 'Cliente'}`);
+      const local = [c.bairro, c.pontoRef].filter(Boolean).join(' — ');
+      if (local) linhas.push(`📍 ${local}`);
+      if (c.endereco) linhas.push(`🏠 ${c.endereco}`);
+      if (c.telefone) linhas.push(`📞 ${U.fmtTelefone(c.telefone)}`);
+      let subtotalCliente = 0;
+      for (const v of vs) {
+        const p = prodMap.get(v.produtoId);
+        const totalItem = v.unidades * v.valorUnitCentavos;
+        subtotalCliente += totalItem;
+        linhas.push(`   • ${p ? p.nome : 'Produto'}: ${v.unidades} un — ${U.fmtMoeda(totalItem)}`);
+      }
+      linhas.push(`   ➜ Subtotal: ${U.fmtMoeda(subtotalCliente)}`);
+      linhas.push('');
+    }
+
+    linhas.push('━━━━━━━━━━━━');
+    linhas.push('📊 RESUMO DO DIA');
+    linhas.push('');
+
+    linhas.push('📥 Estoque retirado:');
+    for (const [produtoId, un] of estoqueMap) {
+      const p = prodMap.get(produtoId);
+      linhas.push(`   • ${p ? p.nome : 'Produto'}: ${un} un${detalheCaixas(un, p)}`);
+    }
+    if (!estoqueMap.size) linhas.push('   • nenhum registro de carga');
+
+    linhas.push('');
+    linhas.push('↩️ Devoluções:');
+    for (const [produtoId, un] of devMap) {
+      const p = prodMap.get(produtoId);
+      const valorDev = un * ((p || {}).precoCentavos || 0);
+      linhas.push(`   • ${p ? p.nome : 'Produto'}: ${un} un — ${U.fmtMoeda(valorDev)}`);
+    }
+    if (!devMap.size) linhas.push('   • nada devolvido');
+
+    linhas.push('');
+    linhas.push('💰 Vendas:');
+    const totaisVenda = agrupar(vendas);
+    for (const [produtoId, un] of totaisVenda) {
+      const p = prodMap.get(produtoId);
+      const totalProd = vendas
+        .filter((v) => v.produtoId === produtoId)
+        .reduce((s, v) => s + v.unidades * v.valorUnitCentavos, 0);
+      linhas.push(`   • ${p ? p.nome : 'Produto'}: ${un} un — ${U.fmtMoeda(totalProd)}`);
+    }
+
+    const pagarFornecedorCentavos = arrecadadoCentavos - ganhoCentavos;
+    linhas.push('');
+    linhas.push(`💵 Arrecadado: ${U.fmtMoeda(arrecadadoCentavos)}`);
+    linhas.push(`🏭 A pagar ao fornecedor: ${U.fmtMoeda(pagarFornecedorCentavos)}`);
+    linhas.push(`🤝 Minha comissão: ${U.fmtMoeda(ganhoCentavos)}`);
+
+    textoFornecedorAtual = linhas.join('\n');
+    return textoFornecedorAtual;
+  }
+
+  async function compartilharFornecedor() {
+    const texto = await montarTextoFornecedor();
+    if (!texto) return;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'Pedido do dia — Prospera Order', text: texto });
+        U.toast('Enviado!');
+      } catch (e) {}
+    } else {
+      await copiarTexto(texto);
+      U.toast('Copiado! Cole no WhatsApp do fornecedor.');
+    }
+  }
+
+  async function whatsappFornecedor() {
+    const texto = await montarTextoFornecedor();
+    if (!texto) return;
+    window.open('https://wa.me/?text=' + encodeURIComponent(texto), '_blank', 'noopener');
+  }
+
+  async function copiarFornecedor() {
+    const texto = textoFornecedorAtual || (await montarTextoFornecedor());
+    if (!texto) return;
+    await copiarTexto(texto);
+    U.toast('Pedido copiado! 📋');
+  }
+
+  async function copiarTexto(texto) {
+    try {
+      await navigator.clipboard.writeText(texto);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = texto;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+  }
+
+  async function excluirDiaria() {
+    const r = await U.promptDialog(
+      'Excluir diária',
+      `<label class="field"><span>Senha de administrador</span>
+        <input name="senha" type="password" inputmode="numeric" autocomplete="off" placeholder="••••••"></label>`,
+      'Continuar'
+    );
+    if (!r) return;
+    if (r.senha !== SENHA_EXCLUIR_DIARIA) {
+      return U.toast('Senha incorreta.', 'erro');
+    }
+    const dia = await DB.db.diarias.get(state.diaIdAberto);
+    if (!dia) return U.toast('Diária não encontrada.', 'erro');
+    const ok = await U.confirmar(
+      'Apagar definitivamente',
+      `Apagar <b>tudo</b> da diária de <b>${U.fmtData(dia.data)}</b>?<br><small class="muted">Cargas, vendas e devoluções serão removidos. Não dá para desfazer.</small>`,
+      'Apagar'
+    );
+    if (!ok) return;
+    await DB.db.transaction('rw', ['diarias', 'cargas', 'vendas', 'devolucoes'], async () => {
+      await DB.db.cargas.where('diariaId').equals(dia.id).delete();
+      await DB.db.vendas.where('diariaId').equals(dia.id).delete();
+      await DB.db.devolucoes.where('diariaId').equals(dia.id).delete();
+      await DB.db.diarias.delete(dia.id);
+    });
+    state.diaIdAberto = null;
+    U.toast('Diária excluída. 🗑');
+    go('relatorios');
+  }
+
+  async function copiarResumo() {    const dia = await DB.db.diarias.get(state.diaIdAberto);
     const produtos = await DB.produtosAtivos();
     const { cargas, vendas, devolucoes } = await DB.dadosDiaria(dia.id);
     const r = Calc.resumoDiaria(cargas, vendas, devolucoes, produtos);
@@ -510,18 +736,8 @@
       `Meu ganho: ${U.fmtMoeda(r.ganhoCentavos)}`,
     ];
     const texto = linhas.join('\n');
-    try {
-      await navigator.clipboard.writeText(texto);
-      U.toast('Resumo copiado!');
-    } catch {
-      const ta = document.createElement('textarea');
-      ta.value = texto;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      ta.remove();
-      U.toast('Resumo copiado!');
-    }
+    await copiarTexto(texto);
+    U.toast('Resumo copiado!');
   }
 
   function setDiaTab(t) {
@@ -559,16 +775,45 @@
   }
 
   async function formCliente(id) {
-    const c = id ? await DB.db.clientes.get(id) : { nome: '', telefone: '', endereco: '', ativo: 1 };
+    const c = id
+      ? await DB.db.clientes.get(id)
+      : { nome: '', telefone: '', endereco: '', bairro: '', pontoRef: '', ativo: 1 };
     const campos = `
       <label class="field"><span>Nome do estabelecimento *</span><input name="nome" value="${U.esc(c.nome)}" placeholder="Ex: Mercado Central"></label>
-      <label class="field"><span>Telefone</span><input name="telefone" value="${U.esc(c.telefone || '')}" inputmode="tel" placeholder="(00) 00000-0000"></label>
-      <label class="field"><span>Endereço / referência</span><input name="endereco" value="${U.esc(c.endereco || '')}" placeholder="Rua, bairro..."></label>`;
-    const r = await U.promptDialog(id ? 'Editar cliente' : 'Novo cliente', campos);
+      <label class="field"><span>Telefone / WhatsApp *</span><input name="telefone" value="${U.esc(c.telefone || '')}" inputmode="tel" placeholder="(88) 90000-0000"></label>
+      <div class="grid-2">
+        <label class="field"><span>Bairro *</span><input name="bairro" value="${U.esc(c.bairro || '')}" placeholder="Ex: Centro"></label>
+        <label class="field"><span>Ponto de referência</span><input name="pontoRef" value="${U.esc(c.pontoRef || '')}" placeholder="Ex: perto da igreja"></label>
+      </div>
+      <label class="field"><span>Endereço *</span><input name="endereco" value="${U.esc(c.endereco || '')}" placeholder="Rua, número..."></label>`;
+    const r = await U.promptDialog(
+      id ? 'Editar cliente' : 'Novo cliente',
+      campos,
+      undefined,
+      (dlg) => {
+        const tel = dlg.querySelector('input[name="telefone"]');
+        if (!tel) return;
+        tel.addEventListener('input', () => {
+          tel.value = U.mascaraTelefone(tel.value);
+        });
+      }
+    );
     if (!r) return;
-    if (!r.nome.trim()) return U.toast('O nome é obrigatório.', 'erro');
-    if (id) await DB.db.clientes.update(id, { nome: r.nome.trim(), telefone: r.telefone.trim(), endereco: r.endereco.trim() });
-    else await DB.db.clientes.add({ nome: r.nome.trim(), telefone: r.telefone.trim(), endereco: r.endereco.trim(), ativo: 1, criadoEm: Date.now() });
+    if (!r.nome.trim()) return U.toast('O nome do estabelecimento é obrigatório.', 'erro');
+    const telDigitos = r.telefone.replace(/\D/g, '');
+    if (!telDigitos) return U.toast('O telefone é obrigatório.', 'erro');
+    if (telDigitos.length < 10) return U.toast('Telefone incompleto — digite DDD + número.', 'erro');
+    if (!r.bairro.trim()) return U.toast('O bairro é obrigatório.', 'erro');
+    if (!r.endereco.trim()) return U.toast('O endereço é obrigatório.', 'erro');
+    const dados = {
+      nome: r.nome.trim(),
+      telefone: r.telefone.trim(),
+      endereco: r.endereco.trim(),
+      bairro: r.bairro.trim(),
+      pontoRef: r.pontoRef.trim(),
+    };
+    if (id) await DB.db.clientes.update(id, dados);
+    else await DB.db.clientes.add({ ...dados, ativo: 1, criadoEm: Date.now() });
     U.toast(id ? 'Cliente atualizado!' : 'Cliente cadastrado! ✅');
     render();
   }
@@ -600,8 +845,9 @@
             <button class="link danger" onclick="App.toggleCliente(${c.id},${c.ativo ? 0 : 1})">${c.ativo ? 'desativar' : 'ativar'}</button>
           </div>
         </div>
-        ${c.telefone ? `<p>📞 ${U.esc(c.telefone)}</p>` : ''}
-        ${c.endereco ? `<p class="muted">📍 ${U.esc(c.endereco)}</p>` : ''}
+        ${c.telefone ? `<p>📞 ${U.esc(U.fmtTelefone(c.telefone))}</p>` : ''}
+        ${c.bairro || c.pontoRef ? `<p class="muted">📍 ${U.esc([c.bairro, c.pontoRef].filter(Boolean).join(' — '))}</p>` : ''}
+        ${c.endereco ? `<p class="muted">🏠 ${U.esc(c.endereco)}</p>` : ''}
         <div class="linha-resumo">
           <div><small>Total comprado</small><b>${U.fmtMoeda(total)}</b></div>
           <div><small>Pedidos</small><b>${ordenadas.length}</b></div>
@@ -802,7 +1048,11 @@
         <p class="small"><b>Android (Chrome):</b> menu ⋮ → “Adicionar à tela inicial”.<br>
         <b>iPhone (Safari):</b> botão compartilhar ↑ → “Adicionar à Tela de Início”.</p>
       </div>
-      <p class="center muted small">Prospera Order · v1.0</p>`;
+      <div class="card">
+        <h3>💬 Suporte</h3>
+        <a class="btn ghost block" style="text-decoration:none" href="https://wa.me/5588993132963?text=Ol%C3%A1%21%20Preciso%20de%20suporte%20no%20Prospera%20Order." target="_blank" rel="noopener noreferrer">Falar no WhatsApp</a>
+      </div>
+      <p class="center muted small">Prospera Order · v1.0.0</p>`;
   }
 
   async function salvarNome(v) {
@@ -832,7 +1082,8 @@
     salvarCarga, apagarCarga,
     stepper, trocarClienteSel, registrarVenda, apagarVenda,
     salvarDevolucoes, apagarDevolucao,
-    fecharDia, reabrirDia, copiarResumo,
+    fecharDia, reabrirDia, copiarResumo, compartilharFornecedor, whatsappFornecedor, copiarFornecedor,
+    excluirDiaria,
     buscar, formCliente, toggleCliente,
     formProduto, toggleProduto, excluirProduto,
     trocarMes, exportarCsv,

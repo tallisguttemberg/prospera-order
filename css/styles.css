@@ -68,6 +68,18 @@ main#view {
   padding: 16px 14px calc(84px + env(safe-area-inset-bottom));
 }
 
+main#view::after {
+  content: "Produzido por TALLIS GUTTEMBERG";
+  display: block;
+  text-align: center;
+  font-size: .7rem;
+  font-weight: 600;
+  letter-spacing: .5px;
+  color: var(--primary);
+  opacity: .85;
+  margin-top: 6px;
+}
+
 .tabbar {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 30;
   display: flex;
@@ -290,7 +302,7 @@ dialog#dlg h3 { margin-bottom: 10px; }
 .fab {
   position: fixed;
   right: 16px;
-  bottom: calc(88px + env(safe-area-inset-bottom));
+  bottom: calc(154px + env(safe-area-inset-bottom));
   width: 54px; height: 54px;
   border-radius: 50%;
   border: none;
@@ -303,6 +315,14 @@ dialog#dlg h3 { margin-bottom: 10px; }
   box-shadow: 0 4px 16px rgba(22, 163, 74, .45);
 }
 .fab:active { transform: scale(.92); }
+
+.fab-wpp {
+  bottom: calc(88px + env(safe-area-inset-bottom));
+  background: #25d366;
+  box-shadow: 0 4px 16px rgba(37, 211, 102, .45);
+  display: flex; align-items: center; justify-content: center;
+  text-decoration: none;
+}
 
 .calc-widget {
   --esc: 1;
