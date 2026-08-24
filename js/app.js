@@ -2,6 +2,7 @@
   'use strict';
 
   const U = Util;
+  const LOCALIDADES = root.LOCALIDADES || [];
   const state = {
     view: 'home',
     diaTab: 'carga',
@@ -784,7 +785,23 @@
   async function formCliente(id) {
     const c = id
       ? await DB.db.clientes.get(id)
-      : { nome: '', telefone: '', endereco: '', bairro: '', pontoRef: '', ativo: 1 };
+      : { nome: '', telefone: '', endereco: '', bairro: '', pontoRef: '', estado: '', cidade: '', obs: '', ativo: 1 };
+    const cidadesDe = (uf) => ((LOCALIDADES.find((e) => e.uf === uf) || {}).cidades || []);
+    const optsCidades = (uf, sel) =>
+      ['<option value="">Selecione...</option>']
+        .concat(
+          cidadesDe(uf).map(
+            (cid) => `<option value="${U.esc(cid)}"${cid === sel ? ' selected' : ''}>${U.esc(cid)}</option>`
+          )
+        )
+        .join('');
+    const optsEstados = ['<option value="">Selecione...</option>']
+      .concat(
+        LOCALIDADES.map(
+          (e) => `<option value="${e.uf}"${e.uf === c.estado ? ' selected' : ''}>${U.esc(e.nome)} (${e.uf})</option>`
+        )
+      )
+      .join('');
     const campos = `
       <label class="field"><span>Nome do estabelecimento *</span><input name="nome" value="${U.esc(c.nome)}" placeholder="Ex: Mercado Central"></label>
       <label class="field"><span>Responsável pela compra *</span><input name="responsavel" value="${U.esc(c.responsavel || '')}" placeholder="Ex: João Silva"></label>
@@ -793,17 +810,30 @@
         <label class="field"><span>Bairro *</span><input name="bairro" value="${U.esc(c.bairro || '')}" placeholder="Ex: Centro"></label>
         <label class="field"><span>Ponto de referência</span><input name="pontoRef" value="${U.esc(c.pontoRef || '')}" placeholder="Ex: perto da igreja"></label>
       </div>
-      <label class="field"><span>Endereço *</span><input name="endereco" value="${U.esc(c.endereco || '')}" placeholder="Rua, número..."></label>`;
+      <label class="field"><span>Endereço *</span><input name="endereco" value="${U.esc(c.endereco || '')}" placeholder="Rua, número..."></label>
+      <div class="grid-2">
+        <label class="field"><span>Estado</span><select name="estado" id="selEstado">${optsEstados}</select></label>
+        <label class="field"><span>Cidade</span><select name="cidade" id="selCidade">${optsCidades(c.estado, c.cidade)}</select></label>
+      </div>
+      <label class="field"><span>Obs.</span><input name="obs" value="${U.esc(c.obs || '')}" placeholder="Observação extra (opcional)"></label>`;
     const r = await U.promptDialog(
       id ? 'Editar cliente' : 'Novo cliente',
       campos,
       undefined,
       (dlg) => {
         const tel = dlg.querySelector('input[name="telefone"]');
-        if (!tel) return;
-        tel.addEventListener('input', () => {
-          tel.value = U.mascaraTelefone(tel.value);
-        });
+        if (tel) {
+          tel.addEventListener('input', () => {
+            tel.value = U.mascaraTelefone(tel.value);
+          });
+        }
+        const selEstado = dlg.querySelector('#selEstado');
+        if (selEstado) {
+          selEstado.addEventListener('change', () => {
+            const selCidade = dlg.querySelector('#selCidade');
+            selCidade.innerHTML = optsCidades(selEstado.value, '');
+          });
+        }
       }
     );
     if (!r) return;
@@ -821,6 +851,9 @@
       endereco: r.endereco.trim(),
       bairro: r.bairro.trim(),
       pontoRef: r.pontoRef.trim(),
+      estado: r.estado || '',
+      cidade: r.cidade || '',
+      obs: (r.obs || '').trim(),
     };
     if (id) await DB.db.clientes.update(id, dados);
     else await DB.db.clientes.add({ ...dados, ativo: 1, criadoEm: Date.now() });
@@ -888,7 +921,9 @@
         ${c.responsavel ? `<p>👤 Resp.: ${U.esc(c.responsavel)}</p>` : ''}
         ${c.telefone ? `<p>📞 ${U.esc(U.fmtTelefone(c.telefone))}</p>` : ''}
         ${c.bairro || c.pontoRef ? `<p class="muted">📍 ${U.esc([c.bairro, c.pontoRef].filter(Boolean).join(' — '))}</p>` : ''}
+        ${c.cidade || c.estado ? `<p class="muted">🏛 ${U.esc([c.cidade, c.estado].filter(Boolean).join(' - '))}</p>` : ''}
         ${c.endereco ? `<p class="muted">🏠 ${U.esc(c.endereco)}</p>` : ''}
+        ${c.obs ? `<p class="muted">📝 Obs.: ${U.esc(c.obs)}</p>` : ''}
         <div class="linha-resumo">
           <div><small>Total comprado</small><b>${U.fmtMoeda(total)}</b></div>
           <div><small>Pedidos</small><b>${ordenadas.length}</b></div>

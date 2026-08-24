@@ -1,4 +1,4 @@
-const CACHE = 'prospera-order-v21';
+const CACHE = 'prospera-order-v23';
 const ARQUIVOS = [
   './',
   './index.html',
@@ -9,6 +9,7 @@ const ARQUIVOS = [
   './js/calculadora.js',
   './js/util.js',
   './js/db.js',
+  './js/localidades.js',
   './js/reports.js',
   './js/backup.js',
   './js/app.js',
