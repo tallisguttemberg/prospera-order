@@ -26,7 +26,7 @@
 
   const SENHA_EXCLUIR_DIARIA = '150619';
 
-  const VERSAO = '1.0.3';
+  const VERSAO = '1.1.0';
 
   async function init() {
     try {
@@ -785,7 +785,7 @@
   async function formCliente(id) {
     const c = id
       ? await DB.db.clientes.get(id)
-      : { nome: '', telefone: '', endereco: '', bairro: '', pontoRef: '', estado: '', cidade: '', obs: '', ativo: 1 };
+      : { nome: '', telefone: '', cnpj: '', endereco: '', bairro: '', pontoRef: '', estado: '', cidade: '', obs: '', ativo: 1 };
     const cidadesDe = (uf) => ((LOCALIDADES.find((e) => e.uf === uf) || {}).cidades || []);
     const optsCidades = (uf, sel) =>
       ['<option value="">Selecione...</option>']
@@ -806,6 +806,7 @@
       <label class="field"><span>Nome do estabelecimento *</span><input name="nome" value="${U.esc(c.nome)}" placeholder="Ex: Mercado Central"></label>
       <label class="field"><span>Responsável pela compra *</span><input name="responsavel" value="${U.esc(c.responsavel || '')}" placeholder="Ex: João Silva"></label>
       <label class="field"><span>Telefone / WhatsApp *</span><input name="telefone" value="${U.esc(c.telefone || '')}" inputmode="tel" placeholder="(88) 90000-0000"></label>
+      <label class="field"><span>CNPJ</span><input name="cnpj" value="${U.esc(c.cnpj || '')}" inputmode="numeric" placeholder="00.000.000/0000-00 (opcional)"></label>
       <div class="grid-2">
         <label class="field"><span>Bairro *</span><input name="bairro" value="${U.esc(c.bairro || '')}" placeholder="Ex: Centro"></label>
         <label class="field"><span>Ponto de referência</span><input name="pontoRef" value="${U.esc(c.pontoRef || '')}" placeholder="Ex: perto da igreja"></label>
@@ -827,6 +828,12 @@
             tel.value = U.mascaraTelefone(tel.value);
           });
         }
+        const cnpj = dlg.querySelector('input[name="cnpj"]');
+        if (cnpj) {
+          cnpj.addEventListener('input', () => {
+            cnpj.value = U.mascaraCnpj(cnpj.value);
+          });
+        }
         const selEstado = dlg.querySelector('#selEstado');
         if (selEstado) {
           selEstado.addEventListener('change', () => {
@@ -842,12 +849,15 @@
     const telDigitos = r.telefone.replace(/\D/g, '');
     if (!telDigitos) return U.toast('O telefone é obrigatório.', 'erro');
     if (telDigitos.length < 10) return U.toast('Telefone incompleto — digite DDD + número.', 'erro');
+    const cnpjDigitos = (r.cnpj || '').replace(/\D/g, '');
+    if (cnpjDigitos && cnpjDigitos.length !== 14) return U.toast('CNPJ incompleto — deixe vazio ou digite os 14 números.', 'erro');
     if (!r.bairro.trim()) return U.toast('O bairro é obrigatório.', 'erro');
     if (!r.endereco.trim()) return U.toast('O endereço é obrigatório.', 'erro');
     const dados = {
       nome: r.nome.trim(),
       responsavel: r.responsavel.trim(),
       telefone: r.telefone.trim(),
+      cnpj: cnpjDigitos ? U.mascaraCnpj(cnpjDigitos) : '',
       endereco: r.endereco.trim(),
       bairro: r.bairro.trim(),
       pontoRef: r.pontoRef.trim(),
@@ -919,6 +929,7 @@
           </div>
         </div>
         ${c.responsavel ? `<p>👤 Resp.: ${U.esc(c.responsavel)}</p>` : ''}
+        ${c.cnpj ? `<p class="muted">🏢 CNPJ: ${U.esc(U.fmtCnpj(c.cnpj))}</p>` : ''}
         ${c.telefone ? `<p>📞 ${U.esc(U.fmtTelefone(c.telefone))}</p>` : ''}
         ${c.bairro || c.pontoRef ? `<p class="muted">📍 ${U.esc([c.bairro, c.pontoRef].filter(Boolean).join(' — '))}</p>` : ''}
         ${c.cidade || c.estado ? `<p class="muted">🏛 ${U.esc([c.cidade, c.estado].filter(Boolean).join(' - '))}</p>` : ''}
@@ -964,9 +975,13 @@
       <div class="card">
         ${produtos.map((p) => `
           <div class="item-lista div">
+            ${p.imagem && p.imagem.startsWith('data:image')
+              ? `<img class="thumb-produto" alt="" src="${p.imagem}" title="Ver foto"
+                   onclick="event.stopPropagation(); App.verImagemProduto(${p.id})">`
+              : '<span class="thumb-produto sem-foto">🛒</span>'}
             <div onclick="App.formProduto(${p.id})" style="flex:1">
               <b>${U.esc(p.nome)}</b>${p.ativo ? '' : ' <span class="tag off">inativo</span>'}
-              <br><small class="muted">${U.fmtMoeda(p.precoCentavos)} · caixa ${p.unidPorCaixa} un · ganho ${U.fmtMoeda(p.comissaoCentavos)}/un</small>
+              <br><small class="muted">${U.fmtMoeda(p.precoCentavos)}${p.gramatura ? ' · ' + U.esc(p.gramatura) + 'g' : ''} · caixa ${p.unidPorCaixa} un · ganho ${U.fmtMoeda(p.comissaoCentavos)}/un</small>
             </div>
             ${usados.has(p.id)
               ? `<button class="link danger" onclick="App.toggleProduto(${p.id},${p.ativo ? 0 : 1})">${p.ativo ? 'desativar' : 'ativar'}</button>`
@@ -976,27 +991,87 @@
   }
 
   async function formProduto(id) {
-    const p = id ? await DB.db.produtos.get(id) : { nome: '', descricao: '', precoCentavos: 0, comissaoCentavos: 50, unidPorCaixa: 1 };
+    const p = id
+      ? await DB.db.produtos.get(id)
+      : { nome: '', descricao: '', gramatura: '', imagem: '', precoCentavos: 0, comissaoCentavos: 50, unidPorCaixa: 1 };
+    const temImagem = !!(p.imagem && p.imagem.startsWith('data:image'));
+    let imagemFinal = temImagem ? p.imagem : '';
     const campos = `
       <label class="field"><span>Nome *</span><input name="nome" value="${U.esc(p.nome)}" placeholder="Ex: Rosquinha 300g"></label>
+      <div class="field">
+        <span>Foto do produto</span>
+        <div class="img-linha">
+          <img id="imgPreview" class="img-preview" alt="" ${temImagem ? `src="${p.imagem}"` : 'hidden'}>
+          <div class="img-acoes">
+            <button type="button" class="btn ghost small" id="btnEscolherImg">📷 Escolher</button>
+            <button type="button" class="btn ghost small danger" id="btnRemoverImg" ${temImagem ? '' : 'hidden'}>Remover</button>
+          </div>
+          <small class="muted" id="imgDica">${temImagem ? '' : 'Opcional — ajuda a reconhecer na hora da venda.'}</small>
+        </div>
+        <input type="file" id="inpImagem" accept="image/*" hidden>
+      </div>
       <label class="field"><span>Descrição</span><input name="descricao" value="${U.esc(p.descricao || '')}" placeholder="Ex: Pacote de 300g"></label>
+      <div class="grid-2">
+        <label class="field"><span>Gramatura (g)</span><input name="gramatura" type="number" step="1" min="0" value="${U.esc(p.gramatura || '')}" inputmode="numeric" placeholder="Ex: 400 (opcional)"></label>
+        <label class="field"><span>Unidades por caixa *</span><input name="unid" type="number" step="1" min="1" value="${p.unidPorCaixa}"></label>
+      </div>
       <div class="grid-2">
         <label class="field"><span>Preço de venda (R$) *</span><input name="preco" type="number" step="0.01" min="0" value="${(p.precoCentavos / 100).toFixed(2)}"></label>
         <label class="field"><span>Sua comissão/un (R$)</span><input name="comissao" type="number" step="0.01" min="0" value="${(p.comissaoCentavos / 100).toFixed(2)}"></label>
-      </div>
-      <label class="field"><span>Unidades por caixa *</span><input name="unid" type="number" step="1" min="1" value="${p.unidPorCaixa}"></label>`;
-    const r = await U.promptDialog(id ? 'Editar produto' : 'Novo produto', campos);
+      </div>`;
+    const r = await U.promptDialog(
+      id ? 'Editar produto' : 'Novo produto',
+      campos,
+      undefined,
+      (dlg) => {
+        const inp = dlg.querySelector('#inpImagem');
+        const prev = dlg.querySelector('#imgPreview');
+        const btnEscolher = dlg.querySelector('#btnEscolherImg');
+        const btnRemover = dlg.querySelector('#btnRemoverImg');
+        const dica = dlg.querySelector('#imgDica');
+        if (!inp) return;
+        btnEscolher.addEventListener('click', () => inp.click());
+        inp.addEventListener('change', async () => {
+          const f = inp.files[0];
+          if (!f) return;
+          try {
+            imagemFinal = await U.redimensionarImagem(f);
+            prev.src = imagemFinal;
+            prev.hidden = false;
+            btnRemover.hidden = false;
+            dica.textContent = '';
+          } catch (e) {
+            U.toast(e.message || 'Não foi possível carregar a imagem.', 'erro');
+          }
+          inp.value = '';
+        });
+        btnRemover.addEventListener('click', () => {
+          imagemFinal = '';
+          prev.removeAttribute('src');
+          prev.hidden = true;
+          btnRemover.hidden = true;
+          dica.textContent = 'Foto removida — salve para confirmar.';
+        });
+      }
+    );
     if (!r) return;
     if (!r.nome.trim()) return U.toast('O nome é obrigatório.', 'erro');
     const preco = U.parseMoedaParaCentavos(r.preco);
     const comissao = U.parseMoedaParaCentavos(r.comissao || '0');
     const unid = parseInt(r.unid, 10);
+    let gramatura = null;
+    if ((r.gramatura || '').trim() !== '') {
+      gramatura = parseInt(r.gramatura, 10);
+      if (!Number.isFinite(gramatura) || gramatura <= 0) return U.toast('Gramatura inválida.', 'erro');
+    }
     if (preco == null || preco <= 0) return U.toast('Preço inválido.', 'erro');
     if (comissao == null || comissao < 0 || comissao >= preco) return U.toast('Comissão inválida (deve ser menor que o preço).', 'erro');
     if (!Number.isFinite(unid) || unid < 1) return U.toast('Unidades por caixa inválidas.', 'erro');
     const dados = {
       nome: r.nome.trim(),
       descricao: r.descricao.trim(),
+      gramatura,
+      imagem: imagemFinal || '',
       precoCentavos: preco,
       comissaoCentavos: comissao,
       unidPorCaixa: unid,
@@ -1005,6 +1080,16 @@
     else await DB.db.produtos.add({ ...dados, ativo: 1, criadoEm: Date.now() });
     U.toast(id ? 'Produto atualizado!' : 'Produto cadastrado! ✅');
     render();
+  }
+
+  async function verImagemProduto(id) {
+    const p = await DB.db.produtos.get(id);
+    if (!p || !p.imagem || !p.imagem.startsWith('data:image')) return;
+    U.verImagem({
+      src: p.imagem,
+      titulo: p.nome,
+      subtitulo: `${U.fmtMoeda(p.precoCentavos)}${p.gramatura ? ' · ' + p.gramatura + 'g' : ''}`,
+    });
   }
 
   async function toggleProduto(id, novoStatus) {
@@ -1161,7 +1246,7 @@
     fecharDia, reabrirDia, copiarResumo, compartilharFornecedor, whatsappFornecedor, copiarFornecedor,
     excluirDiaria,
     buscar, formCliente, toggleCliente, excluirCliente,
-    formProduto, toggleProduto, excluirProduto,
+    formProduto, toggleProduto, excluirProduto, verImagemProduto,
     trocarMes, exportarCsv,
     fazerBackup, importarBackup, salvarNome, snapshotAgora, restaurarSnapshot, excluirSnapshot,
     get state() { return state; },

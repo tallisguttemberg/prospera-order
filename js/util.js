@@ -51,6 +51,74 @@
     return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
   }
 
+  function mascaraCnpj(valor) {
+    const d = String(valor || '').replace(/\D/g, '').slice(0, 14);
+    if (!d) return '';
+    let out = d.slice(0, 2);
+    if (d.length > 2) out += '.' + d.slice(2, 5);
+    if (d.length > 5) out += '.' + d.slice(5, 8);
+    if (d.length > 8) out += '/' + d.slice(8, 12);
+    if (d.length > 12) out += '-' + d.slice(12, 14);
+    return out;
+  }
+
+  function fmtCnpj(raw) {
+    const d = String(raw || '').replace(/\D/g, '');
+    if (d.length !== 14) return raw || '';
+    return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
+  }
+
+  function redimensionarImagem(arquivo, maxLado = 512, qualidade = 0.8) {
+    return new Promise((resolve, reject) => {
+      if (!arquivo || !/^image\//.test(arquivo.type || '')) {
+        return reject(new Error('O arquivo escolhido não é uma imagem.'));
+      }
+      const leitor = new FileReader();
+      leitor.onerror = () => reject(new Error('Falha ao ler a imagem.'));
+      leitor.onload = () => {
+        const img = new Image();
+        img.onerror = () => reject(new Error('Imagem inválida.'));
+        img.onload = () => {
+          const escala = Math.min(1, maxLado / Math.max(img.width, img.height));
+          const w = Math.max(1, Math.round(img.width * escala));
+          const h = Math.max(1, Math.round(img.height * escala));
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL('image/jpeg', qualidade));
+        };
+        img.src = String(leitor.result);
+      };
+      leitor.readAsDataURL(arquivo);
+    });
+  }
+
+  function verImagem({ src, titulo = '', subtitulo = '' }) {
+    if (!src) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'img-viewer';
+    overlay.innerHTML = `
+      <button class="img-viewer-fechar" type="button" aria-label="Fechar">✕</button>
+      <figure class="img-viewer-corpo">
+        <img src="${esc(src)}" alt="${esc(titulo)}">
+        ${titulo ? `<figcaption><b>${esc(titulo)}</b>${subtitulo ? `<br><small>${esc(subtitulo)}</small>` : ''}</figcaption>` : ''}
+      </figure>`;
+    const aoTecla = (e) => {
+      if (e.key === 'Escape') fechar();
+    };
+    function fechar() {
+      document.removeEventListener('keydown', aoTecla);
+      overlay.remove();
+    }
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) fechar();
+    });
+    overlay.querySelector('.img-viewer-fechar').addEventListener('click', fechar);
+    document.addEventListener('keydown', aoTecla);
+    document.body.appendChild(overlay);
+  }
+
   function fmtTelefone(raw) {
     const d = String(raw || '').replace(/\D/g, '');
     if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
@@ -123,6 +191,10 @@
     fmtDataHora,
     fmtTelefone,
     mascaraTelefone,
+    mascaraCnpj,
+    fmtCnpj,
+    redimensionarImagem,
+    verImagem,
     esc,
     toast,
     confirmar,
