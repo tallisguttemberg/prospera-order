@@ -1,15 +1,17 @@
-const CACHE = 'prospera-order-v26';
+const CACHE = 'prospera-order-v29';
 const ARQUIVOS = [
   './',
   './index.html',
   './manifest.json',
   './css/styles.css',
   './js/vendor/dexie.min.js',
+  './js/vendor/jspdf.umd.min.js',
   './js/calc.js',
   './js/calculadora.js',
   './js/util.js',
   './js/db.js',
   './js/localidades.js',
+  './js/pdf.js',
   './js/reports.js',
   './js/backup.js',
   './js/app.js',
@@ -29,7 +31,13 @@ self.addEventListener('activate', (e) => {
       .keys()
       .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
+      .then(() => self.clients.matchAll())
+      .then((clients) => clients.forEach((c) => c.postMessage({ type: 'SW_UPDATED' })))
   );
+});
+
+self.addEventListener('message', (e) => {
+  if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('fetch', (e) => {

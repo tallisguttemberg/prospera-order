@@ -374,6 +374,7 @@
               <button class="icon-btn" onclick="App.apagarVenda(${v.id})">🗑</button>
             </div>`;
           }).join('')}
+          <button class="btn ghost block" onclick="App.exportarPdfCliente(${cid})">📄 Enviar PDF</button>
         </div>`;
       }
       html += '</div>';
@@ -1173,6 +1174,8 @@
 
   async function renderAjustes(el) {
     const nome = await DB.getConfig('vendedorNome');
+    const empresa = await DB.getConfig('empresaNome');
+    const contato = await DB.getConfig('empresaContato');
     const ultimo = await DB.getConfig('ultimoBackupArquivo');
     const snaps = await Backup.listarSnapshots();
     el.innerHTML = `
@@ -1180,6 +1183,12 @@
         <h3>Perfil</h3>
         <label class="field"><span>Seu nome</span>
           <input value="${U.esc(nome || '')}" onchange="App.salvarNome(this.value)" placeholder="Como quer ser chamado?">
+        </label>
+        <label class="field"><span>Empresa</span>
+          <input value="${U.esc(empresa || '')}" onchange="App.salvarEmpresa(this.value)" placeholder="Nome da empresa que representa">
+        </label>
+        <label class="field"><span>Contato</span>
+          <input value="${U.esc(contato || '')}" onchange="App.salvarContato(this.value)" placeholder="Telefone ou email de contato">
         </label>
       </div>
       <div class="card">
@@ -1221,6 +1230,45 @@
     U.toast('Salvo!');
   }
 
+  async function salvarEmpresa(v) {
+    await DB.setConfig('empresaNome', v.trim());
+    U.toast('Salvo!');
+  }
+
+  async function salvarContato(v) {
+    await DB.setConfig('empresaContato', v.trim());
+    U.toast('Salvo!');
+  }
+
+  async function exportarPdfCliente(clienteId) {
+    try {
+      const cliente = await DB.db.clientes.get(clienteId);
+      if (!cliente) return U.toast('Cliente não encontrado.', 'erro');
+      let diaria = null;
+      if (state.diaIdAberto) {
+        diaria = await DB.db.diarias.get(state.diaIdAberto);
+      }
+      if (!diaria) {
+        diaria = await DB.diariaAberta();
+      }
+      if (!diaria) return U.toast('Nenhuma diária encontrada.', 'erro');
+      const vendas = await DB.db.vendas.where('diariaId').equals(diaria.id).filter((v) => v.clienteId === clienteId).toArray();
+      if (!vendas.length) return U.toast('Sem vendas para este cliente.', 'erro');
+      const produtos = await DB.db.produtos.toArray();
+      const config = {
+        vendedorNome: await DB.getConfig('vendedorNome') || '',
+        empresaNome: await DB.getConfig('empresaNome') || '',
+        empresaContato: await DB.getConfig('empresaContato') || '',
+      };
+      const doc = PdfExport.vendaCliente(cliente, vendas, produtos, config);
+      const nomeArquivo = `venda-${(cliente.nome || 'cliente').replace(/\s+/g, '_')}-${diaria.data}.pdf`;
+      await PdfExport.compartilharPdf(doc, nomeArquivo);
+      U.toast('PDF pronto!');
+    } catch (e) {
+      U.toast('Erro ao gerar PDF.', 'erro');
+    }
+  }
+
   async function snapshotAgora() {
     await Backup.criarSnapshot('manual');
     U.toast('Versão salva!');
@@ -1248,7 +1296,7 @@
     buscar, formCliente, toggleCliente, excluirCliente,
     formProduto, toggleProduto, excluirProduto, verImagemProduto,
     trocarMes, exportarCsv,
-    fazerBackup, importarBackup, salvarNome, snapshotAgora, restaurarSnapshot, excluirSnapshot,
+    fazerBackup, importarBackup, salvarNome, salvarEmpresa, salvarContato, exportarPdfCliente, snapshotAgora, restaurarSnapshot, excluirSnapshot,
     get state() { return state; },
   };
 
