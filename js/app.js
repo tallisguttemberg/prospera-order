@@ -29,7 +29,7 @@
 
   const SENHA_EXCLUIR_DIARIA = '150619';
 
-  const VERSAO = '1.2.0';
+  const VERSAO = '2.0.0';
 
   async function init() {
     try {
