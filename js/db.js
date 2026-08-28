@@ -14,6 +14,18 @@
     config: 'chave',
   });
 
+  db.version(2).stores({
+    produtos: '++id, nome, ativo',
+    clientes: '++id, nome, ativo',
+    diarias: '++id, &data, status',
+    cargas: '++id, diariaId, produtoId',
+    vendas: '++id, diariaId, clienteId, produtoId',
+    devolucoes: '++id, diariaId, produtoId',
+    snapshots: '++id, criadoEm',
+    config: 'chave',
+    visitas: '++id, clienteId, data',
+  });
+
   db.on('populate', async () => {
     await db.produtos.bulkAdd([
       {

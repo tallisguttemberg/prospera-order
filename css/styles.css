@@ -159,6 +159,8 @@ main#view::after {
   font-weight: 600; cursor: pointer; font-size: .85rem; padding: 4px;
 }
 .link.danger { color: var(--danger); }
+.link-wpp { color: #25D366; font-weight: 600; text-decoration: none; }
+.link-wpp:hover { text-decoration: underline; }
 
 .field { display: block; margin-bottom: 12px; }
 .field span { display: block; font-size: .78rem; font-weight: 600; color: var(--muted); margin-bottom: 5px; }
@@ -309,6 +311,35 @@ button.item-lista:active { background: var(--bg); border-radius: 10px; }
 }
 .tag.off { background: var(--bg); color: var(--muted); }
 .tag.fechado { background: #dcfce7; color: var(--ok); font-size: .78rem; padding: 6px 14px; }
+
+.tag.visita { font-size: .66rem; padding: 2px 8px; }
+.tag.visita.at { background: #fee2e2; color: #b91c1c; }
+.tag.visita.hj { background: #dbeafe; color: #1d4ed8; }
+.tag.visita.px { background: #fef3c7; color: #b45309; }
+.tag.visita.ed { background: #dcfce7; color: #15803d; }
+.tag.visita.sv { background: #f1f5f9; color: #475569; }
+
+.hj-c { color: #1d4ed8; }
+
+.chipbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.chip {
+  border: 1.5px solid var(--border); background: #fff; color: var(--muted);
+  border-radius: 999px; padding: 7px 12px; font-size: .78rem; font-weight: 700;
+  cursor: pointer; font-family: inherit;
+}
+.chip:active { transform: scale(.96); }
+.chip.ativo { background: var(--primary); border-color: var(--primary); color: #fff; }
+
+.banner.visita {
+  background: #fef2f2; border: 1px solid #fecaca; color: #991b1b;
+  border-radius: var(--radius); padding: 13px 15px; margin-bottom: 14px;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  font-size: .88rem; cursor: pointer; width: 100%; text-align: left; font-family: inherit;
+}
+.banner.visita small { color: #991b1b; }
+.banner.visita .seta { color: #991b1b; }
+
+.card-visita { border-left: 5px solid var(--accent); }
 
 .aviso {
   background: #fee2e2; color: #991b1b; border-radius: 12px;

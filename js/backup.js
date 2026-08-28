@@ -6,7 +6,7 @@
   const MAX_SNAPSHOTS = 20;
 
   async function dumpAll() {
-    const [produtos, clientes, diarias, cargas, vendas, devolucoes, config] =
+    const [produtos, clientes, diarias, cargas, vendas, devolucoes, visitas, config] =
       await Promise.all([
         DB.db.produtos.toArray(),
         DB.db.clientes.toArray(),
@@ -14,13 +14,14 @@
         DB.db.cargas.toArray(),
         DB.db.vendas.toArray(),
         DB.db.devolucoes.toArray(),
+        DB.db.visitas.toArray(),
         DB.db.config.toArray(),
       ]);
     return {
       app: 'prospera-order',
       versao: 1,
       geradoEm: Date.now(),
-      dados: { produtos, clientes, diarias, cargas, vendas, devolucoes, config },
+      dados: { produtos, clientes, diarias, cargas, vendas, devolucoes, visitas, config },
     };
   }
 
@@ -28,7 +29,7 @@
     const d = dump.dados;
     await DB.db.transaction(
       'rw',
-      ['produtos', 'clientes', 'diarias', 'cargas', 'vendas', 'devolucoes', 'config'],
+      ['produtos', 'clientes', 'diarias', 'cargas', 'vendas', 'devolucoes', 'visitas', 'config'],
       async () => {
         await Promise.all([
           DB.db.produtos.clear(),
@@ -37,6 +38,7 @@
           DB.db.cargas.clear(),
           DB.db.vendas.clear(),
           DB.db.devolucoes.clear(),
+          DB.db.visitas.clear(),
           DB.db.config.clear(),
         ]);
         await DB.db.produtos.bulkAdd(d.produtos || []);
@@ -45,6 +47,7 @@
         await DB.db.cargas.bulkAdd(d.cargas || []);
         await DB.db.vendas.bulkAdd(d.vendas || []);
         await DB.db.devolucoes.bulkAdd(d.devolucoes || []);
+        await DB.db.visitas.bulkAdd(d.visitas || []);
         await DB.db.config.bulkPut(d.config || []);
       }
     );

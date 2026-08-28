@@ -11,6 +11,8 @@
     busca: '',
     qtdVenda: {},
     vendaClienteId: '',
+    acompFiltro: 'todos',
+    acompOrdena: 'atraso',
   };
 
   const TITULOS = {
@@ -19,6 +21,7 @@
     cliente: 'Cliente',
     produtos: 'Produtos',
     relatorios: 'Relatórios',
+    acompanhamento: 'Visitas',
     ajustes: 'Ajustes',
   };
 
@@ -26,7 +29,7 @@
 
   const SENHA_EXCLUIR_DIARIA = '150619';
 
-  const VERSAO = '1.1.0';
+  const VERSAO = '1.2.0';
 
   async function init() {
     try {
@@ -39,6 +42,8 @@
         } catch (e) {}
       }
       await Backup.iniciarAuto();
+      await Acomp.migrar();
+      await seedClientesDemo();
       const nome = await DB.getConfig('vendedorNome');
       if (!nome) {
         const r = await U.promptDialog(
@@ -93,20 +98,32 @@
       case 'cliente': return renderClienteDetalhe(view);
       case 'produtos': return renderProdutos(view);
       case 'relatorios': return renderRelatorios(view);
+      case 'acompanhamento': return renderAcompanhamento(view);
       case 'ajustes': return renderAjustes(view);
     }
   }
 
   async function renderHome(el) {
-    const [nome, hoje, lembrete] = await Promise.all([
+    const [nome, hoje, lembrete, pendentes] = await Promise.all([
       DB.getConfig('vendedorNome'),
       DB.diariaAberta(),
       Backup.lembretePendente(),
+      Acomp.clientesPendentes(),
     ]);
     const mes = U.mesAtualISO();
     const { resumo } = await Relatorios.dadosDoPeriodo(mes);
     const ultimas = (await DB.db.diarias.orderBy('data').reverse().limit(7).toArray());
     let html = '';
+    if (pendentes.length) {
+      html += `
+        <div class="banner visita" role="button" onclick="App.go('acompanhamento')">
+          <div>
+            <b>Clientes para visitar!</b><br>
+            <small>Você possui ${pendentes.length} cliente(s) que precisam de visita.</small>
+          </div>
+          <span class="seta">›</span>
+        </div>`;
+    }
     if (lembrete) {
       html += `
         <div class="banner">
@@ -412,6 +429,7 @@
       });
     }
     await DB.db.vendas.bulkAdd(registros);
+    await Acomp.marcarVisita(clienteId, U.hojeISO());
     state.qtdVenda = {};
     U.toast('Venda registrada! ✅');
     await renderDiaTab();
@@ -419,7 +437,9 @@
 
   async function apagarVenda(id) {
     if ((await diaTravado()) || !(await U.confirmar('Remover venda', 'Remover esta venda do dia?'))) return;
+    const v = await DB.db.vendas.get(id);
     await DB.db.vendas.delete(id);
+    if (v) await Acomp.recalcularUltimaVisita(v.clienteId);
     await renderDiaTab();
   }
 
@@ -771,7 +791,9 @@
         ${lista.length ? lista.map((c) => `
           <button class="item-lista" onclick="App.go('cliente',{clienteId:${c.id}})">
             <div><b>${U.esc(c.nome)}</b>${c.ativo ? '' : ' <span class="tag off">inativo</span>'}
-              <br><small class="muted">${U.esc(c.telefone || '')}</small></div>
+              <br>${c.telefone && c.telefone.replace(/\D/g, '')
+                ? `<small><a class="link-wpp" href="https://wa.me/${c.telefone.replace(/\D/g, '')}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">📞 ${U.esc(U.fmtTelefone(c.telefone))}</a></small>`
+                : '<small class="muted">Sem telefone</small>'}</div>
             <span class="seta">›</span>
           </button>`).join('')
         : '<p class="muted center">Nenhum cliente cadastrado.</p>'}
@@ -896,7 +918,10 @@
       'Apagar'
     );
     if (!ok) return;
-    await DB.db.clientes.delete(c.id);
+    await DB.db.transaction('rw', ['clientes', 'visitas'], async () => {
+      await DB.db.visitas.where('clienteId').equals(c.id).delete();
+      await DB.db.clientes.delete(c.id);
+    });
     U.toast('Cliente excluído. 🗑');
     go('clientes');
   }
@@ -919,6 +944,7 @@
     const ordenadas = [...porData.entries()].sort((a, b) =>
       ((dataPor.get(b[0]) || {}).data || '').localeCompare((dataPor.get(a[0]) || {}).data || '')
     );
+    const cardVisita = await cardVisitaCliente(c);
     el.innerHTML = `
       <div class="card">
         <div class="card-top">
@@ -931,7 +957,9 @@
         </div>
         ${c.responsavel ? `<p>👤 Resp.: ${U.esc(c.responsavel)}</p>` : ''}
         ${c.cnpj ? `<p class="muted">🏢 CNPJ: ${U.esc(U.fmtCnpj(c.cnpj))}</p>` : ''}
-        ${c.telefone ? `<p>📞 ${U.esc(U.fmtTelefone(c.telefone))}</p>` : ''}
+        ${c.telefone && c.telefone.replace(/\D/g, '')
+          ? `<p>📞 <a class="link-wpp" href="https://wa.me/${c.telefone.replace(/\D/g, '')}" target="_blank" rel="noopener noreferrer">${U.esc(U.fmtTelefone(c.telefone))}</a></p>`
+          : ''}
         ${c.bairro || c.pontoRef ? `<p class="muted">📍 ${U.esc([c.bairro, c.pontoRef].filter(Boolean).join(' — '))}</p>` : ''}
         ${c.cidade || c.estado ? `<p class="muted">🏛 ${U.esc([c.cidade, c.estado].filter(Boolean).join(' - '))}</p>` : ''}
         ${c.endereco ? `<p class="muted">🏠 ${U.esc(c.endereco)}</p>` : ''}
@@ -941,6 +969,7 @@
           <div><small>Pedidos</small><b>${ordenadas.length}</b></div>
         </div>
       </div>
+      ${cardVisita}
       ${ordenadas.map(([did, vs]) => {
         const d = dataPor.get(did);
         const tot = vs.reduce((s, v) => s + v.unidades * v.valorUnitCentavos, 0);
@@ -960,6 +989,175 @@
     }
     await DB.db.clientes.update(id, { ativo: novoStatus });
     go('clientes');
+  }
+
+  function legendaVisita(aval) {
+    switch (aval.status) {
+      case 'sem-visita':
+        return 'Nunca visitado — registre a primeira visita.';
+      case 'atrasada':
+        return `${aval.diasDesde} dia(s) sem visita. A próxima já era para ${U.fmtData(aval.proximaVisita)}.`;
+      case 'hoje':
+        return 'Visita programada para hoje — não deixe passar!';
+      case 'proxima':
+        return `Faltam ${aval.diasRestantes} dia(s) para a próxima visita (${U.fmtData(aval.proximaVisita)}).`;
+      default:
+        return `Em dia — próximo ciclo em ${U.fmtData(aval.proximaVisita)} (${aval.diasRestantes} dia(s)).`;
+    }
+  }
+
+  async function cardVisitaCliente(c) {
+    const aval = Acomp.avaliar(c, U.hojeISO());
+    const st = Acomp.STATUS_INFO[aval.status];
+    const hist = await Acomp.historico(c.id);
+    return `
+      <div class="card card-visita">
+        <div class="card-top">
+          <h3>🕓 Acompanhamento de visitas</h3>
+          <span class="tag visita ${st.classe}">${st.emoji} ${st.rotulo}</span>
+        </div>
+        <div class="linha-resumo">
+          <div><small>Última visita</small><b>${aval.ultimaVisita ? U.fmtData(aval.ultimaVisita) : 'Nunca'}</b></div>
+          <div><small>Próxima visita</small><b>${aval.proximaVisita ? U.fmtData(aval.proximaVisita) : '—'}</b></div>
+        </div>
+        <p class="muted small" style="margin:8px 0 0">${U.esc(legendaVisita(aval))}</p>
+        <div class="row-gap">
+          <button class="btn primary" onclick="App.registrarVisita(${c.id})">📋 Registrar visita</button>
+          ${(c.telefone || '').replace(/\D/g, '')
+            ? `<a class="btn ghost" href="https://wa.me/${c.telefone.replace(/\D/g, '')}?text=${encodeURIComponent('Olá! Passando para registrar a visita. 😊')}" target="_blank" rel="noopener noreferrer">💬 Chamar</a>`
+            : ''}
+        </div>
+      </div>
+      <div class="card">
+        <h3>Histórico de visitas</h3>
+        ${hist.length
+          ? hist.map((h) => `
+            <div class="item-lista div">
+              <div><b>${U.fmtData(h.data)}</b><br><small class="muted">Visita realizada</small></div>
+            </div>`).join('')
+          : '<p class="muted">Nenhuma visita registrada ainda.</p>'}
+      </div>`;
+  }
+
+  async function registrarVisita(clienteId) {
+    const c = await DB.db.clientes.get(clienteId);
+    if (!c) return;
+    const hoje = U.hojeISO();
+    const r = await U.promptDialog(
+      'Registrar visita',
+      `<label class="field"><span>Data da visita</span>
+        <input name="data" type="date" value="${hoje}" max="${hoje}"></label>
+       <p class="muted small">A próxima visita será recalculada para 15 dias após a data informada.</p>`,
+      'Registrar'
+    );
+    if (!r) return;
+    if (!r.data) return U.toast('Informe a data da visita.', 'erro');
+    if (r.data > hoje) return U.toast('A data não pode ser no futuro.', 'erro');
+    await Acomp.marcarVisita(clienteId, r.data);
+    U.toast('Visita registrada! 🎉');
+    render();
+  }
+
+  async function renderAcompanhamento(el) {
+    const hoje = U.hojeISO();
+    const clientes = await DB.db.clientes.toArray();
+    const aval = Acomp.avaliarTodos(clientes, hoje);
+    const grupos = Acomp.agrupar(aval);
+    const contagem = (s) => (grupos.get(s) || []).length;
+    const filtro = state.acompFiltro;
+    const ordena = state.acompOrdena;
+
+    const chips = [
+      ['todos', `Todos (${aval.length})`],
+      ['atrasada', `Atrasadas (${contagem('atrasada')})`],
+      ['hoje', `Hoje (${contagem('hoje')})`],
+      ['proxima', `Próximas (${contagem('proxima')})`],
+      ['em-dia', `Em dia (${contagem('em-dia')})`],
+      ['sem-visita', `Sem visita (${contagem('sem-visita')})`],
+    ];
+
+    el.innerHTML = `
+      <div class="mini-stats">
+        <div><span class="erro">${contagem('atrasada')}</span><small>Atrasadas</small></div>
+        <div><span class="hj-c">${contagem('hoje')}</span><small>Hoje</small></div>
+        <div><span class="alerta">${contagem('proxima')}</span><small>Próximas</small></div>
+        <div><span class="ok">${contagem('em-dia')}</span><small>Em dia</small></div>
+      </div>
+      ${contagem('sem-visita')
+        ? `<p class="muted small">⚪ ${contagem('sem-visita')} cliente(s) ainda sem visita registrada.</p>`
+        : ''}
+      <div class="card">
+        <div class="chipbar">
+          ${chips.map(([v, rot]) => `
+            <button class="chip ${filtro === v ? 'ativo' : ''}" onclick="App.setAcompFiltro('${v}')">${U.esc(rot)}</button>`).join('')}
+        </div>
+        <label class="field" style="margin-bottom:0"><span>Ordenar por</span>
+          <select onchange="App.setAcompOrdena(this.value)">
+            <option value="atraso" ${ordena === 'atraso' ? 'selected' : ''}>Mais atrasados primeiro</option>
+            <option value="proxima" ${ordena === 'proxima' ? 'selected' : ''}>Próxima visita</option>
+            <option value="nome" ${ordena === 'nome' ? 'selected' : ''}>Nome do cliente</option>
+          </select>
+        </label>
+      </div>
+      ${renderListaAcomp(grupos, filtro, ordena)}`;
+  }
+
+  function renderListaAcomp(grupos, filtro, ordena) {
+    if (filtro === 'todos') {
+      const secoes = [
+        ['atrasada', '🔴 VISITAS ATRASADAS'],
+        ['hoje', '🔵 VISITA HOJE'],
+        ['proxima', '🟠 VISITAS PRÓXIMAS'],
+        ['em-dia', '🟢 EM DIA'],
+        ['sem-visita', '⚪ SEM VISITA REGISTRADA'],
+      ];
+      let html = '';
+      for (const [status, titulo] of secoes) {
+        const itens = Acomp.ordenar(grupos.get(status) || [], ordena);
+        if (!itens.length) continue;
+        html += `<div class="card"><h3>${titulo}</h3>${itens.map(itemAcomp).join('')}</div>`;
+      }
+      if (!html) html = '<div class="card center"><p class="muted">Nenhum cliente cadastrado.</p></div>';
+      return html;
+    }
+    const itens = Acomp.ordenar(grupos.get(filtro) || [], ordena);
+    if (!itens.length) return '<div class="card center"><p class="muted">Nenhum cliente neste grupo.</p></div>';
+    return `<div class="card">${itens.map(itemAcomp).join('')}</div>`;
+  }
+
+  function itemAcomp(e) {
+    const st = Acomp.STATUS_INFO[e.status];
+    const c = e.cliente;
+    let sub;
+    if (e.status === 'sem-visita') {
+      sub = 'Nunca visitado — considere agendar a primeira visita.';
+    } else {
+      sub =
+        `Últ. visita ${U.fmtData(e.ultimaVisita)} · ` +
+        (e.status === 'atrasada'
+          ? `<b class="erro">${e.diasDesde} dia(s) sem visita</b>`
+          : e.status === 'hoje'
+            ? '<b class="hj-c">programada para hoje</b>'
+            : `próx. ${U.fmtData(e.proximaVisita)} · faltam <b>${e.diasRestantes}</b> dia(s)`);
+    }
+    return `
+      <button class="item-lista" onclick="App.go('cliente',{clienteId:${c.id}})">
+        <div>
+          <b>${U.esc(c.nome)}</b> <span class="tag visita ${st.classe}">${st.emoji} ${st.rotulo}</span>
+          <br><small class="muted">${sub}</small>
+        </div>
+        <span class="seta">›</span>
+      </button>`;
+  }
+
+  function setAcompFiltro(v) {
+    state.acompFiltro = v;
+    render();
+  }
+
+  function setAcompOrdena(v) {
+    state.acompOrdena = v;
+    render();
   }
 
   async function renderProdutos(el) {
@@ -1286,6 +1484,24 @@
     render();
   }
 
+  async function seedClientesDemo() {
+    const feito = await DB.getConfig('seedClientesDemo');
+    if (feito) return;
+    const hoje = U.hojeISO();
+    const demo = [
+      { nome: 'Mercado Nossa Senhora', responsavel: 'Carlos Pereira', telefone: '(88) 98111-1111', bairro: 'Centro', endereco: 'Rua das Flores, 120', atrasoDias: 19 },
+      { nome: 'Padaria Pão Dourado', responsavel: 'Maria Alves', telefone: '(88) 98222-2222', bairro: 'São José', endereco: 'Av. Principal, 340', atrasoDias: 23 },
+      { nome: 'Mercearia Boa Vista', responsavel: 'José Lopes', telefone: '(88) 98333-3333', bairro: 'Santa Luzia', endereco: 'Rua do Sol, 88', atrasoDias: 31 },
+    ];
+    for (const d of demo) {
+      const { atrasoDias, ...dados } = d;
+      const ultima = Acomp.somarDias(hoje, -atrasoDias);
+      const id = await DB.db.clientes.add({ ...dados, ativo: 1, ultimaVisita: ultima, criadoEm: Date.now() });
+      await DB.db.visitas.add({ clienteId: id, data: ultima, criadoEm: Date.now(), origem: 'demo' });
+    }
+    await DB.setConfig('seedClientesDemo', Date.now());
+  }
+
   root.App = {
     init, go, abrirDiaria, verDia, setDiaTab,
     salvarCarga, apagarCarga,
@@ -1294,6 +1510,7 @@
     fecharDia, reabrirDia, copiarResumo, compartilharFornecedor, whatsappFornecedor, copiarFornecedor,
     excluirDiaria,
     buscar, formCliente, toggleCliente, excluirCliente,
+    registrarVisita, setAcompFiltro, setAcompOrdena,
     formProduto, toggleProduto, excluirProduto, verImagemProduto,
     trocarMes, exportarCsv,
     fazerBackup, importarBackup, salvarNome, salvarEmpresa, salvarContato, exportarPdfCliente, snapshotAgora, restaurarSnapshot, excluirSnapshot,
