@@ -27,9 +27,13 @@
 
   const SLOGAN = 'Anote. Venda. Prospere.';
 
-  const SENHA_EXCLUIR_DIARIA = '150619';
-
   const VERSAO = '2.0.0';
+
+  async function senhaExclusaoConfere(senhaDigitada) {
+    const senha = await DB.getConfig('senhaExclusao');
+    if (!senha) return true;
+    return senhaDigitada === senha;
+  }
 
   async function init() {
     try {
@@ -47,10 +51,33 @@
       if (!nome) {
         const r = await U.promptDialog(
           'Bem-vindo!',
-          `<label class="field"><span>Seu nome</span><input name="nome" placeholder="Ex: João"></label>`,
+          `<label class="field"><span>Seu nome</span><input name="nome" placeholder="Ex: João"></label>
+           <label class="field"><span>Empresa que representa</span><input name="empresa" placeholder="Digite NENHUMA se não tiver"></label>
+           <label class="field"><span>Seu WhatsApp</span><input name="whatsapp" inputmode="tel" placeholder="(88) 90000-0000"></label>`,
           'Começar'
         );
-        if (r && r.nome) await DB.setConfig('vendedorNome', r.nome.trim());
+        if (r) {
+          const telDig = (r.whatsapp || '').replace(/\D/g, '');
+          if (!r.nome || !r.nome.trim()) return U.toast('Informe seu nome.', 'erro');
+          if (telDig.length < 10) return U.toast('Informe um WhatsApp válido.', 'erro');
+          const empresa = (r.empresa || '').trim().toUpperCase() === 'NENHUMA' ? '' : (r.empresa || '').trim();
+          await DB.setConfig('vendedorNome', r.nome.trim());
+          await DB.setConfig('empresaNome', empresa);
+          await DB.setConfig('vendedorWhatsapp', U.mascaraTelefone(telDig));
+          await DB.setConfig('empresaContato', U.mascaraTelefone(telDig));
+          const senha = await U.promptDialog(
+            'Senha de exclusão',
+            `<label class="field"><span>Defina uma senha para excluir dados</span>
+              <input name="senha" type="password" inputmode="numeric" autocomplete="off" placeholder="••••••"></label>
+             <small class="muted">Ela será pedida sempre que você for excluir qualquer item no sistema.</small>`,
+            'Salvar'
+          );
+          if (senha && senha.senha.trim()) {
+            await DB.setConfig('senhaExclusao', senha.senha.trim());
+          } else {
+            return U.toast('A senha de exclusão é obrigatória.', 'erro');
+          }
+        }
       }
       go('home');
     } catch (e) {
@@ -724,12 +751,13 @@
   async function excluirDiaria() {
     const r = await U.promptDialog(
       'Excluir diária',
-      `<label class="field"><span>Senha de administrador</span>
+      `<label class="field"><span>Senha de exclusão</span>
         <input name="senha" type="password" inputmode="numeric" autocomplete="off" placeholder="••••••"></label>`,
       'Continuar'
     );
     if (!r) return;
-    if (r.senha !== SENHA_EXCLUIR_DIARIA) {
+    const senhaVálida = await senhaExclusaoConfere(r.senha);
+    if (!senhaVálida) {
       return U.toast('Senha incorreta.', 'erro');
     }
     const dia = await DB.db.diarias.get(state.diaIdAberto);
@@ -898,12 +926,13 @@
     if (!c) return go('clientes');
     const r = await U.promptDialog(
       'Excluir cliente',
-      `<label class="field"><span>Senha de administrador</span>
+      `<label class="field"><span>Senha de exclusão</span>
         <input name="senha" type="password" inputmode="numeric" autocomplete="off" placeholder="••••••"></label>`,
       'Continuar'
     );
     if (!r) return;
-    if (r.senha !== SENHA_EXCLUIR_DIARIA) {
+    const senhaVálida = await senhaExclusaoConfere(r.senha);
+    if (!senhaVálida) {
       return U.toast('Senha incorreta.', 'erro');
     }
     const vendasCliente = await DB.db.vendas.where('clienteId').equals(c.id).count();
@@ -1300,6 +1329,15 @@
   }
 
   async function excluirProduto(id) {
+    const r = await U.promptDialog(
+      'Excluir produto',
+      `<label class="field"><span>Senha de exclusão</span>
+        <input name="senha" type="password" inputmode="numeric" autocomplete="off" placeholder="••••••"></label>`,
+      'Continuar'
+    );
+    if (!r) return;
+    const senhaVálida = await senhaExclusaoConfere(r.senha);
+    if (!senhaVálida) return U.toast('Senha incorreta.', 'erro');
     const ok = await U.confirmar('Excluir produto', 'Excluir permanentemente? Só é possível se nunca foi usado.', 'Excluir');
     if (!ok) return;
     await DB.db.produtos.delete(id);
@@ -1372,7 +1410,7 @@
   async function renderAjustes(el) {
     const nome = await DB.getConfig('vendedorNome');
     const empresa = await DB.getConfig('empresaNome');
-    const contato = await DB.getConfig('empresaContato');
+    const whatsapp = await DB.getConfig('vendedorWhatsapp');
     const ultimo = await DB.getConfig('ultimoBackupArquivo');
     const snaps = await Backup.listarSnapshots();
     el.innerHTML = `
@@ -1384,8 +1422,15 @@
         <label class="field"><span>Empresa</span>
           <input value="${U.esc(empresa || '')}" onchange="App.salvarEmpresa(this.value)" placeholder="Nome da empresa que representa">
         </label>
-        <label class="field"><span>Contato</span>
-          <input value="${U.esc(contato || '')}" onchange="App.salvarContato(this.value)" placeholder="Telefone ou email de contato">
+        <label class="field"><span>Seu WhatsApp</span>
+          <input value="${U.esc(whatsapp || '')}" onchange="App.salvarWhatsapp(this.value)" inputmode="tel" placeholder="(88) 90000-0000">
+        </label>
+      </div>
+      <div class="card">
+        <h3>🔒 Senha de exclusão</h3>
+        <p class="muted small">Pedida sempre que você for excluir um item (diária, cliente ou produto).</p>
+        <label class="field"><span>Nova senha</span>
+          <input type="password" inputmode="numeric" autocomplete="off" onchange="App.salvarSenhaExclusao(this.value)" placeholder="●●●●●●">
         </label>
       </div>
       <div class="card">
@@ -1432,9 +1477,20 @@
     U.toast('Salvo!');
   }
 
-  async function salvarContato(v) {
-    await DB.setConfig('empresaContato', v.trim());
+  async function salvarWhatsapp(v) {
+    const dig = (v || '').replace(/\D/g, '');
+    if (dig && dig.length < 10) return U.toast('WhatsApp incompleto.', 'erro');
+    const numero = dig ? U.mascaraTelefone(dig) : '';
+    await DB.setConfig('vendedorWhatsapp', numero);
+    await DB.setConfig('empresaContato', numero);
     U.toast('Salvo!');
+  }
+
+  async function salvarSenhaExclusao(v) {
+    const s = (v || '').trim();
+    if (!s) return U.toast('A senha não pode ficar vazia.', 'erro');
+    await DB.setConfig('senhaExclusao', s);
+    U.toast('Senha de exclusão atualizada! 🔒');
   }
 
   async function exportarPdfCliente(clienteId) {
@@ -1494,7 +1550,7 @@
     registrarVisita, setAcompFiltro, setAcompOrdena,
     formProduto, toggleProduto, excluirProduto, verImagemProduto,
     trocarMes, exportarCsv,
-    fazerBackup, importarBackup, salvarNome, salvarEmpresa, salvarContato, exportarPdfCliente, snapshotAgora, restaurarSnapshot, excluirSnapshot,
+    fazerBackup, importarBackup, salvarNome, salvarEmpresa, salvarWhatsapp, salvarSenhaExclusao, exportarPdfCliente, snapshotAgora, restaurarSnapshot, excluirSnapshot,
     get state() { return state; },
   };
 

@@ -50,6 +50,8 @@
     await db.config.put({ chave: 'vendedorNome', valor: '' });
     await db.config.put({ chave: 'empresaNome', valor: '' });
     await db.config.put({ chave: 'empresaContato', valor: '' });
+    await db.config.put({ chave: 'vendedorWhatsapp', valor: '' });
+    await db.config.put({ chave: 'senhaExclusao', valor: '' });
     await db.config.put({ chave: 'ultimoBackupArquivo', valor: null });
   });
 
