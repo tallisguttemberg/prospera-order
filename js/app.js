@@ -43,7 +43,6 @@
       }
       await Backup.iniciarAuto();
       await Acomp.migrar();
-      await seedClientesDemo();
       const nome = await DB.getConfig('vendedorNome');
       if (!nome) {
         const r = await U.promptDialog(
@@ -1482,24 +1481,6 @@
     if (!ok) return;
     await Backup.excluirSnapshot(id);
     render();
-  }
-
-  async function seedClientesDemo() {
-    const feito = await DB.getConfig('seedClientesDemo');
-    if (feito) return;
-    const hoje = U.hojeISO();
-    const demo = [
-      { nome: 'Mercado Nossa Senhora', responsavel: 'Carlos Pereira', telefone: '(88) 98111-1111', bairro: 'Centro', endereco: 'Rua das Flores, 120', atrasoDias: 19 },
-      { nome: 'Padaria Pão Dourado', responsavel: 'Maria Alves', telefone: '(88) 98222-2222', bairro: 'São José', endereco: 'Av. Principal, 340', atrasoDias: 23 },
-      { nome: 'Mercearia Boa Vista', responsavel: 'José Lopes', telefone: '(88) 98333-3333', bairro: 'Santa Luzia', endereco: 'Rua do Sol, 88', atrasoDias: 31 },
-    ];
-    for (const d of demo) {
-      const { atrasoDias, ...dados } = d;
-      const ultima = Acomp.somarDias(hoje, -atrasoDias);
-      const id = await DB.db.clientes.add({ ...dados, ativo: 1, ultimaVisita: ultima, criadoEm: Date.now() });
-      await DB.db.visitas.add({ clienteId: id, data: ultima, criadoEm: Date.now(), origem: 'demo' });
-    }
-    await DB.setConfig('seedClientesDemo', Date.now());
   }
 
   root.App = {
