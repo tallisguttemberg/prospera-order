@@ -126,6 +126,12 @@
     return raw || '';
   }
 
+  function wppNumero(raw) {
+    let d = String(raw || '').replace(/\D/g, '');
+    if (d.length >= 10 && d.length <= 11 && !d.startsWith('55')) d = '55' + d;
+    return d;
+  }
+
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;')
@@ -190,6 +196,7 @@
     fmtDataCurta,
     fmtDataHora,
     fmtTelefone,
+    wppNumero,
     mascaraTelefone,
     mascaraCnpj,
     fmtCnpj,

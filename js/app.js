@@ -819,7 +819,7 @@
           <button class="item-lista" onclick="App.go('cliente',{clienteId:${c.id}})">
             <div><b>${U.esc(c.nome)}</b>${c.ativo ? '' : ' <span class="tag off">inativo</span>'}
               <br>${c.telefone && c.telefone.replace(/\D/g, '')
-                ? `<small><a class="link-wpp" href="https://wa.me/${c.telefone.replace(/\D/g, '')}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">📞 ${U.esc(U.fmtTelefone(c.telefone))}</a></small>`
+                ? `<small><a class="link-wpp" href="https://wa.me/${U.wppNumero(c.telefone)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">📞 ${U.esc(U.fmtTelefone(c.telefone))}</a></small>`
                 : '<small class="muted">Sem telefone</small>'}</div>
             <span class="seta">›</span>
           </button>`).join('')
@@ -986,7 +986,7 @@
         ${c.responsavel ? `<p>👤 Resp.: ${U.esc(c.responsavel)}</p>` : ''}
         ${c.cnpj ? `<p class="muted">🏢 CNPJ: ${U.esc(U.fmtCnpj(c.cnpj))}</p>` : ''}
         ${c.telefone && c.telefone.replace(/\D/g, '')
-          ? `<p>📞 <a class="link-wpp" href="https://wa.me/${c.telefone.replace(/\D/g, '')}" target="_blank" rel="noopener noreferrer">${U.esc(U.fmtTelefone(c.telefone))}</a></p>`
+          ? `<p>📞 <a class="link-wpp" href="https://wa.me/${U.wppNumero(c.telefone)}" target="_blank" rel="noopener noreferrer">${U.esc(U.fmtTelefone(c.telefone))}</a></p>`
           : ''}
         ${c.bairro || c.pontoRef ? `<p class="muted">📍 ${U.esc([c.bairro, c.pontoRef].filter(Boolean).join(' — '))}</p>` : ''}
         ${c.cidade || c.estado ? `<p class="muted">🏛 ${U.esc([c.cidade, c.estado].filter(Boolean).join(' - '))}</p>` : ''}
@@ -1052,7 +1052,7 @@
         <div class="row-gap">
           <button class="btn primary" onclick="App.registrarVisita(${c.id})">📋 Registrar visita</button>
           ${(c.telefone || '').replace(/\D/g, '')
-            ? `<a class="btn ghost" href="https://wa.me/${c.telefone.replace(/\D/g, '')}?text=${encodeURIComponent('Olá! Passando para registrar a visita. 😊')}" target="_blank" rel="noopener noreferrer">💬 Chamar</a>`
+            ? `<a class="btn ghost" href="https://wa.me/${U.wppNumero(c.telefone)}?text=${encodeURIComponent('Olá! Passando para registrar a visita. 😊')}" target="_blank" rel="noopener noreferrer">💬 Chamar</a>`
             : ''}
         </div>
       </div>
