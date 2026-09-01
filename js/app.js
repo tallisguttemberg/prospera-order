@@ -27,7 +27,7 @@
 
   const SLOGAN = 'Anote. Venda. Prospere.';
 
-  const VERSAO = '2.0.2';
+  const VERSAO = '2.0.3';
 
   async function senhaExclusaoConfere(senhaDigitada) {
     const senha = await DB.getConfig('senhaExclusao');

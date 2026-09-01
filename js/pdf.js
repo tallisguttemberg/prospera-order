@@ -28,25 +28,33 @@
     const LARGURA = doc.internal.pageSize.getWidth();
     const MARGEM = 15;
     const LARG_UTIL = LARGURA - MARGEM * 2;
+    const LOGO_DIM = 30;
+    const LOGO_X = LARGURA - MARGEM - LOGO_DIM;
+    const LOGO_Y = MARGEM;
+    const TXT_MAX = LOGO_X - MARGEM - 5;
     let y = MARGEM;
+
+    if (root.LOGO_B64) {
+      doc.addImage(root.LOGO_B64, 'JPEG', LOGO_X, LOGO_Y, LOGO_DIM, LOGO_DIM);
+    }
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
 
     if (config.vendedorNome) {
-      doc.text(String(config.vendedorNome), MARGEM, y);
+      doc.text(String(config.vendedorNome), MARGEM, y, { maxWidth: TXT_MAX });
       y += 5;
     }
     if (config.empresaNome) {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
-      doc.text(String(config.empresaNome), MARGEM, y);
+      doc.text(String(config.empresaNome), MARGEM, y, { maxWidth: TXT_MAX });
       y += 4;
     }
     if (config.empresaContato) {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
-      doc.text('Contato: ' + fmtTelefone(config.empresaContato), MARGEM, y);
+      doc.text('Contato: ' + fmtTelefone(config.empresaContato), MARGEM, y, { maxWidth: TXT_MAX });
       y += 6;
     }
 
@@ -54,6 +62,10 @@
     doc.setLineWidth(0.3);
     doc.line(MARGEM, y, LARGURA - MARGEM, y);
     y += 6;
+
+    if (root.LOGO_B64 && LOGO_Y + LOGO_DIM > y) {
+      y = LOGO_Y + LOGO_DIM;
+    }
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
