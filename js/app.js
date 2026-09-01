@@ -407,8 +407,12 @@
       for (const [cid, vs] of grupos) {
         const c = await DB.db.clientes.get(cid);
         const total = vs.reduce((s, v) => s + v.unidades * v.valorUnitCentavos, 0);
+        const entregue = vs.length > 0 && vs.every((v) => v.entregaConfirmadaEm);
         html += `<div class="venda-grupo">
-          <div class="venda-grupo-top"><b>${U.esc(c ? c.nome : 'Removido')}</b><b>${U.fmtMoeda(total)}</b></div>
+          <div class="venda-grupo-top">
+            <b>${U.esc(c ? c.nome : 'Removido')}${entregue ? ' <span class="tag fechado">✅ Entregue</span>' : ''}</b>
+            <b>${U.fmtMoeda(total)}</b>
+          </div>
           ${vs.map((v) => {
             const nomeP = nomesProduto.get(v.produtoId) || 'Produto removido';
             return `<div class="item-lista div">
@@ -417,7 +421,12 @@
               <button class="icon-btn" onclick="App.apagarVenda(${v.id})">🗑</button>
             </div>`;
           }).join('')}
-          <button class="btn ghost block" onclick="App.exportarPdfCliente(${cid})">📄 Enviar PDF</button>
+          <div class="row-gap">
+            <button class="btn ghost block" onclick="App.exportarPdfCliente(${cid})">📄 Enviar PDF</button>
+            ${entregue
+              ? `<button class="btn ghost block" onclick="App.desfazerEntrega(${cid})">↩ Desfazer entrega</button>`
+              : `<button class="btn primary block" onclick="App.confirmarEntrega(${cid})">📦 Confirmar entrega</button>`}
+          </div>
         </div>`;
       }
       html += '</div>';
@@ -451,6 +460,7 @@
         unidades: q,
         valorUnitCentavos: p.precoCentavos,
         comissaoUnitCentavos: p.comissaoCentavos,
+        entregaConfirmadaEm: null,
         criadoEm: Date.now(),
       });
     }
@@ -466,6 +476,25 @@
     const v = await DB.db.vendas.get(id);
     await DB.db.vendas.delete(id);
     if (v) await Acomp.recalcularUltimaVisita(v.clienteId);
+    await renderDiaTab();
+  }
+
+  async function confirmarEntrega(clienteId) {
+    if (await diaTravado()) return;
+    await DB.db.vendas
+      .where('diariaId').equals(state.diaIdAberto)
+      .and((v) => v.clienteId === clienteId)
+      .modify({ entregaConfirmadaEm: Date.now() });
+    await renderDiaTab();
+  }
+
+  async function desfazerEntrega(clienteId) {
+    if (await diaTravado()) return;
+    if (!(await U.confirmar('Desfazer entrega', 'Marcar o pedido deste cliente como não entregue?'))) return;
+    await DB.db.vendas
+      .where('diariaId').equals(state.diaIdAberto)
+      .and((v) => v.clienteId === clienteId)
+      .modify({ entregaConfirmadaEm: null });
     await renderDiaTab();
   }
 
@@ -1542,7 +1571,7 @@
   root.App = {
     init, go, abrirDiaria, verDia, setDiaTab,
     salvarCarga, apagarCarga,
-    stepper, trocarClienteSel, registrarVenda, apagarVenda,
+    stepper, trocarClienteSel, registrarVenda, apagarVenda, confirmarEntrega, desfazerEntrega,
     salvarDevolucoes, apagarDevolucao,
     fecharDia, reabrirDia, copiarResumo, compartilharFornecedor, whatsappFornecedor, copiarFornecedor,
     excluirDiaria,
