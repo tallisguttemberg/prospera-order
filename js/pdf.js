@@ -28,7 +28,7 @@
     const LARGURA = doc.internal.pageSize.getWidth();
     const MARGEM = 15;
     const LARG_UTIL = LARGURA - MARGEM * 2;
-    const LOGO_DIM = 30;
+    const LOGO_DIM = 14;
     const LOGO_X = LARGURA - MARGEM - LOGO_DIM;
     const LOGO_Y = MARGEM;
     const TXT_MAX = LOGO_X - MARGEM - 5;
