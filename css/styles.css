@@ -268,9 +268,14 @@ button.item-lista:active { background: var(--bg); border-radius: 10px; }
   cursor: pointer;
 }
 .stepper button:active { background: var(--primary-soft); }
-.stepper span {
-  min-width: 40px; text-align: center; font-weight: 800; font-size: 1.15rem;
+.stepper input.qtd-input {
+  width: 56px; height: 40px; text-align: center; font-weight: 800; font-size: 1.15rem;
+  border: 1.5px solid var(--border); border-radius: 12px; padding: 0;
+  color: var(--text-primary); background: #fff;
 }
+.stepper input.qtd-input::-webkit-inner-spin-button,
+.stepper input.qtd-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.stepper input.qtd-input { -moz-appearance: textfield; }
 .venda-grupo { margin-bottom: 12px; }
 .venda-grupo-top {
   display: flex; justify-content: space-between;

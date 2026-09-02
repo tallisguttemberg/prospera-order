@@ -27,7 +27,7 @@
 
   const SLOGAN = 'Anote. Venda. Prospere.';
 
-  const VERSAO = '2.0.4';
+  const VERSAO = '2.1.0';
 
   async function senhaExclusaoConfere(senhaDigitada) {
     const senha = await DB.getConfig('senhaExclusao');
@@ -393,7 +393,7 @@
             <div><b>${U.esc(p.nome)}</b><br><small class="muted">${U.fmtMoeda(p.precoCentavos)} · você ganha ${U.fmtMoeda(p.comissaoCentavos)}</small></div>
             <div class="stepper">
               <button onclick="App.stepper(${p.id}, -1)">−</button>
-              <span id="qtd-${p.id}">${q}</span>
+              <input type="number" id="qtd-${p.id}" class="qtd-input" min="0" step="1" inputmode="numeric" value="${q}" onchange="App.setQtd(${p.id}, this.value)">
               <button onclick="App.stepper(${p.id}, 1)">+</button>
             </div>
           </div>`;
@@ -438,10 +438,17 @@
     state.vendaClienteId = v;
   }
 
+  function setQtd(produtoId, valor) {
+    const q = Math.max(0, Math.floor(Number(valor) || 0));
+    state.qtdVenda[produtoId] = q;
+    const el = document.getElementById(`qtd-${produtoId}`);
+    if (el) el.value = q;
+  }
+
   async function stepper(produtoId, delta) {
     state.qtdVenda[produtoId] = Math.max(0, (state.qtdVenda[produtoId] || 0) + delta);
-    const span = document.getElementById(`qtd-${produtoId}`);
-    if (span) span.textContent = state.qtdVenda[produtoId];
+    const el = document.getElementById(`qtd-${produtoId}`);
+    if (el) el.value = state.qtdVenda[produtoId];
   }
 
   async function registrarVenda() {
@@ -1571,7 +1578,7 @@
   root.App = {
     init, go, abrirDiaria, verDia, setDiaTab,
     salvarCarga, apagarCarga,
-    stepper, trocarClienteSel, registrarVenda, apagarVenda, confirmarEntrega, desfazerEntrega,
+    stepper, setQtd, trocarClienteSel, registrarVenda, apagarVenda, confirmarEntrega, desfazerEntrega,
     salvarDevolucoes, apagarDevolucao,
     fecharDia, reabrirDia, copiarResumo, compartilharFornecedor, whatsappFornecedor, copiarFornecedor,
     excluirDiaria,
