@@ -258,8 +258,15 @@ button.item-lista:active { background: var(--bg); border-radius: 10px; }
 .grupo-inputs .btn { flex-shrink: 0; }
 
 .venda-produto {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 11px 0; border-top: 1px solid var(--border);
+  display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
+  padding: 11px 0; border-top: 1px solid var(--border); gap: 8px;
+}
+.venda-produto > .stepper { margin-left: auto; }
+.saida-tipo { flex: 1 1 100%; margin: 2px 0 0; }
+.saida-tipo select { width: 100%; }
+.saida-tag {
+  display: inline-block; background: #fef3c7; color: #b45309;
+  font-size: .66rem; padding: 2px 8px; border-radius: 999px; margin: 2px 0;
 }
 .stepper { display: flex; align-items: center; gap: 4px; }
 .stepper button {

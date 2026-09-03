@@ -10,6 +10,8 @@
     clienteId: null,
     busca: '',
     qtdVenda: {},
+    tipoSaidaVenda: {},
+    emCaixaVenda: {},
     vendaClienteId: '',
     acompFiltro: 'todos',
     acompOrdena: 'atraso',
@@ -31,8 +33,41 @@
 
   async function senhaExclusaoConfere(senhaDigitada) {
     const senha = await DB.getConfig('senhaExclusao');
-    if (!senha) return true;
-    return senhaDigitada === senha;
+    if (!senha) return { ok: false, semSenha: true };
+    return { ok: String(senhaDigitada || '').trim() === senha, semSenha: false };
+  }
+
+  async function garantirSenhaParaExcluir() {
+    const senha = await DB.getConfig('senhaExclusao');
+    if (!senha) {
+      const r = await U.promptDialog(
+        'Defina uma senha de exclusão',
+        `<p class="muted small">Você ainda não tem senha de exclusão cadastrada. Defina uma agora para poder excluir itens — ela será pedida em toda exclusão.</p>
+         <label class="field"><span>Nova senha</span>
+           <input name="senha" type="password" inputmode="numeric" autocomplete="off" placeholder="••••••"></label>`,
+        'Salvar'
+      );
+      if (!r || !r.senha || !String(r.senha).trim()) {
+        U.toast('Exclusão cancelada — é preciso definir uma senha.', 'erro');
+        return false;
+      }
+      await DB.setConfig('senhaExclusao', String(r.senha).trim());
+      U.toast('Senha de exclusão definida! 🔒');
+      return true;
+    }
+    const r = await U.promptDialog(
+      'Senha de exclusão',
+      `<label class="field"><span>Senha de exclusão</span>
+        <input name="senha" type="password" inputmode="numeric" autocomplete="off" placeholder="••••••"></label>`,
+      'Continuar'
+    );
+    if (!r) return false;
+    const confere = await senhaExclusaoConfere(r.senha);
+    if (!confere.ok) {
+      U.toast('Senha incorreta.', 'erro');
+      return false;
+    }
+    return true;
   }
 
   async function init() {
@@ -197,7 +232,7 @@
       const vendas = await DB.db.vendas.where('diariaId').anyOf(ids).toArray();
       html += '<div class="card"><h3>Últimos dias</h3>';
       for (const d of ultimas) {
-        const vs = vendas.filter((v) => v.diariaId === d.id);
+        const vs = vendas.filter((v) => v.diariaId === d.id && !v.tipoSaida);
         const ganho = vs.reduce((s, v) => s + v.unidades * v.comissaoUnitCentavos, 0);
         const fat = vs.reduce((s, v) => s + v.unidades * v.valorUnitCentavos, 0);
         html += `
@@ -371,7 +406,8 @@
   async function tabVendas(box, dia, produtos, vendas) {
     const clientes = await DB.db.clientes.where('ativo').equals(1).sortBy('nome');
     const todosProdutos = await DB.db.produtos.toArray();
-    const nomesProduto = new Map(todosProdutos.map((p) => [p.id, p.nome]));
+    const nomesProduto = new Map(todosProdutos.map((p) => [p.id, p]));
+    const categorias = await DB.categoriasSaidaAtivas();
     if (!state.vendaClienteId && clientes.length) state.vendaClienteId = String(clientes[0].id);
     let html = '';
     if (!clientes.length) {
@@ -388,14 +424,34 @@
         </label>
         ${produtos.map((p) => {
           const q = state.qtdVenda[p.id] || 0;
+          const temKit = p.unidPorCaixa > 1;
+          const emCaixa = !!state.emCaixaVenda[p.id];
+          const infoVenda = `${U.fmtMoeda(p.precoCentavos)}/un · você ganha ${U.fmtMoeda(p.comissaoCentavos)}/un` + (temKit ? ` · kit ${p.unidPorCaixa} un` : '');
+          const tipoSel = state.tipoSaidaVenda[p.id] || '';
+          const opcoesSaida = categorias.length
+            ? `<option value="" ${tipoSel === '' ? 'selected' : ''}>Venda</option>` +
+              categorias.map((c) => `<option value="${c.id}" ${tipoSel === String(c.id) ? 'selected' : ''}>${U.esc(c.nome)}</option>`).join('')
+            : '<option value="">Venda</option>';
+          const opcoesMedida = temKit
+            ? `<select onchange="App.setEmCaixa(${p.id}, this.value)">
+                <option value="0" ${!emCaixa ? 'selected' : ''}>Unidade</option>
+                <option value="1" ${emCaixa ? 'selected' : ''}>Kit/Caixa</option>
+              </select>`
+            : '<input type="hidden" name="medida" value="0">';
           return `
           <div class="venda-produto">
-            <div><b>${U.esc(p.nome)}</b><br><small class="muted">${U.fmtMoeda(p.precoCentavos)} · você ganha ${U.fmtMoeda(p.comissaoCentavos)}</small></div>
+            <div><b>${U.esc(p.nome)}</b><br><small class="muted">${infoVenda}</small></div>
             <div class="stepper">
               <button onclick="App.stepper(${p.id}, -1)">−</button>
               <input type="number" id="qtd-${p.id}" class="qtd-input" min="0" step="1" inputmode="numeric" value="${q}" onchange="App.setQtd(${p.id}, this.value)">
               <button onclick="App.stepper(${p.id}, 1)">+</button>
             </div>
+            <label class="field saida-tipo"><span>Medida</span>${opcoesMedida}</label>
+            <label class="field saida-tipo"><span>Tipo</span>
+              <select onchange="App.setTipoSaida(${p.id}, this.value)">
+                ${opcoesSaida}
+              </select>
+            </label>
           </div>`;
         }).join('')}
         <button class="btn primary block" onclick="App.registrarVenda()">Registrar venda</button>
@@ -403,35 +459,57 @@
     if (vendas.length) {
       const grupos = new Map();
       for (const v of vendas) grupos.set(v.clienteId, [...(grupos.get(v.clienteId) || []), v]);
-      html += '<div class="card"><h3>Vendas registradas</h3>';
+      html += '<div class="card"><h3>Lançamentos do dia</h3>';
       for (const [cid, vs] of grupos) {
         const c = await DB.db.clientes.get(cid);
-        const total = vs.reduce((s, v) => s + v.unidades * v.valorUnitCentavos, 0);
-        const entregue = vs.length > 0 && vs.every((v) => v.entregaConfirmadaEm);
+        const vendasNormais = vs.filter((v) => !v.tipoSaida);
+        const saidas = vs.filter((v) => v.tipoSaida);
+        const total = vendasNormais.reduce((s, v) => s + v.unidades * v.valorUnitCentavos, 0);
+        const entregue = vendasNormais.length > 0 && vendasNormais.every((v) => v.entregaConfirmadaEm);
+        const catMap = new Map(categorias.map((x) => [x.id, x]));
         html += `<div class="venda-grupo">
           <div class="venda-grupo-top">
             <b>${U.esc(c ? c.nome : 'Removido')}${entregue ? ' <span class="tag fechado">✅ Entregue</span>' : ''}</b>
             <b>${U.fmtMoeda(total)}</b>
           </div>
-          ${vs.map((v) => {
-            const nomeP = nomesProduto.get(v.produtoId) || 'Produto removido';
+          ${vendasNormais.map((v) => {
+            const p = nomesProduto.get(v.produtoId);
+            const exib = Calc.exibirQtd(v.unidades, p, v.emCaixa);
             return `<div class="item-lista div">
-              <div>${v.unidades} × ${U.esc(nomeP)}
+              <div>${exib.rotulo} × ${U.esc(p ? p.nome : 'Produto removido')}
                 <br><small class="muted">${U.fmtMoeda(v.unidades * v.valorUnitCentavos)}</small></div>
               <button class="icon-btn" onclick="App.apagarVenda(${v.id})">🗑</button>
             </div>`;
           }).join('')}
-          <div class="row-gap">
+          ${saidas.map((v) => {
+            const p = nomesProduto.get(v.produtoId);
+            const cat = catMap.get(v.tipoSaida);
+            const exib = Calc.exibirQtd(v.unidades, p, v.emCaixa);
+            return `<div class="item-lista div">
+              <div>${exib.rotulo} × ${U.esc(p ? p.nome : 'Produto removido')}
+                <br><small class="tag saida-tag">${U.esc(cat ? cat.nome : 'Saída')}</small> <small class="muted">${U.fmtMoeda(v.unidades * v.valorUnitCentavos)}</small></div>
+              <button class="icon-btn" onclick="App.apagarVenda(${v.id})">🗑</button>
+            </div>`;
+          }).join('')}
+          ${vendasNormais.length ? `<div class="row-gap">
             <button class="btn ghost block" onclick="App.exportarPdfCliente(${cid})">📄 Enviar PDF</button>
             ${entregue
               ? `<button class="btn ghost block" onclick="App.desfazerEntrega(${cid})">↩ Desfazer entrega</button>`
               : `<button class="btn primary block" onclick="App.confirmarEntrega(${cid})">📦 Confirmar entrega</button>`}
-          </div>
+          </div>` : ''}
         </div>`;
       }
       html += '</div>';
     }
     box.innerHTML = html;
+  }
+
+  function setTipoSaida(produtoId, valor) {
+    state.tipoSaidaVenda[produtoId] = valor;
+  }
+
+  function setEmCaixa(produtoId, valor) {
+    state.emCaixaVenda[produtoId] = valor === '1';
   }
 
   function trocarClienteSel(v) {
@@ -460,13 +538,18 @@
     const registros = [];
     for (const [pid, q] of itens) {
       const p = await DB.db.produtos.get(Number(pid));
+      const tipoSaida = state.tipoSaidaVenda[Number(pid)] || '';
+      const emCaixa = !!state.emCaixaVenda[Number(pid)];
+      const unidades = emCaixa ? q * p.unidPorCaixa : q;
       registros.push({
         diariaId: state.diaIdAberto,
         clienteId,
         produtoId: p.id,
-        unidades: q,
+        unidades,
+        emCaixa: emCaixa ? 1 : 0,
         valorUnitCentavos: p.precoCentavos,
-        comissaoUnitCentavos: p.comissaoCentavos,
+        comissaoUnitCentavos: tipoSaida ? 0 : p.comissaoCentavos,
+        tipoSaida: tipoSaida || undefined,
         entregaConfirmadaEm: null,
         criadoEm: Date.now(),
       });
@@ -474,7 +557,9 @@
     await DB.db.vendas.bulkAdd(registros);
     await Acomp.marcarVisita(clienteId, U.hojeISO());
     state.qtdVenda = {};
-    U.toast('Venda registrada! ✅');
+    state.tipoSaidaVenda = {};
+    state.emCaixaVenda = {};
+    U.toast('Registrado! ✅');
     await renderDiaTab();
   }
 
@@ -679,7 +764,8 @@
     ];
 
     const porCliente = new Map();
-    for (const v of vendas) {
+    const vendasNormais = vendas.filter((v) => !v.tipoSaida);
+    for (const v of vendasNormais) {
       porCliente.set(v.clienteId, [...(porCliente.get(v.clienteId) || []), v]);
       arrecadadoCentavos += v.unidades * v.valorUnitCentavos;
       ganhoCentavos += v.unidades * v.comissaoUnitCentavos;
@@ -697,7 +783,8 @@
         const p = prodMap.get(v.produtoId);
         const totalItem = v.unidades * v.valorUnitCentavos;
         subtotalCliente += totalItem;
-        linhas.push(`   • ${p ? p.nome : 'Produto'}: ${v.unidades} un — ${U.fmtMoeda(totalItem)}`);
+        const exib = Calc.exibirQtd(v.unidades, p, v.emCaixa);
+        linhas.push(`   • ${p ? p.nome : 'Produto'}: ${exib.rotulo} — ${U.fmtMoeda(totalItem)}`);
       }
       linhas.push(`   ➜ Subtotal: ${U.fmtMoeda(subtotalCliente)}`);
       linhas.push('');
@@ -725,13 +812,26 @@
 
     linhas.push('');
     linhas.push('💰 Vendas:');
-    const totaisVenda = agrupar(vendas);
+    const totaisVenda = agrupar(vendasNormais);
     for (const [produtoId, un] of totaisVenda) {
       const p = prodMap.get(produtoId);
-      const totalProd = vendas
+      const totalProd = vendasNormais
         .filter((v) => v.produtoId === produtoId)
         .reduce((s, v) => s + v.unidades * v.valorUnitCentavos, 0);
-      linhas.push(`   • ${p ? p.nome : 'Produto'}: ${un} un — ${U.fmtMoeda(totalProd)}`);
+      const exib = Calc.exibirQtd(un, p);
+      linhas.push(`   • ${p ? p.nome : 'Produto'}: ${exib.rotulo} — ${U.fmtMoeda(totalProd)}`);
+    }
+
+    const saidas = vendas.filter((v) => v.tipoSaida);
+    if (saidas.length) {
+      const catMap = new Map((await DB.categoriasSaidaAtivas()).map((c) => [c.id, c]));
+      linhas.push('');
+      linhas.push('📝 Saídas (defeito/demo/grátis):');
+      for (const v of saidas) {
+        const p = prodMap.get(v.produtoId);
+        const cat = catMap.get(v.tipoSaida);
+        linhas.push(`   • ${p ? p.nome : 'Produto'}: ${v.unidades} un (${cat ? cat.nome : 'Saída'})`);
+      }
     }
 
     const pagarFornecedorCentavos = arrecadadoCentavos - ganhoCentavos;
@@ -785,17 +885,7 @@
   }
 
   async function excluirDiaria() {
-    const r = await U.promptDialog(
-      'Excluir diária',
-      `<label class="field"><span>Senha de exclusão</span>
-        <input name="senha" type="password" inputmode="numeric" autocomplete="off" placeholder="••••••"></label>`,
-      'Continuar'
-    );
-    if (!r) return;
-    const senhaVálida = await senhaExclusaoConfere(r.senha);
-    if (!senhaVálida) {
-      return U.toast('Senha incorreta.', 'erro');
-    }
+    if (!(await garantirSenhaParaExcluir())) return;
     const dia = await DB.db.diarias.get(state.diaIdAberto);
     if (!dia) return U.toast('Diária não encontrada.', 'erro');
     const ok = await U.confirmar(
@@ -960,17 +1050,7 @@
   async function excluirCliente() {
     const c = await DB.db.clientes.get(state.clienteId);
     if (!c) return go('clientes');
-    const r = await U.promptDialog(
-      'Excluir cliente',
-      `<label class="field"><span>Senha de exclusão</span>
-        <input name="senha" type="password" inputmode="numeric" autocomplete="off" placeholder="••••••"></label>`,
-      'Continuar'
-    );
-    if (!r) return;
-    const senhaVálida = await senhaExclusaoConfere(r.senha);
-    if (!senhaVálida) {
-      return U.toast('Senha incorreta.', 'erro');
-    }
+    if (!(await garantirSenhaParaExcluir())) return;
     const vendasCliente = await DB.db.vendas.where('clienteId').equals(c.id).count();
     const aviso =
       vendasCliente > 0
@@ -993,13 +1073,18 @@
   async function renderClienteDetalhe(el) {
     const c = await DB.db.clientes.get(state.clienteId);
     if (!c) return go('clientes');
-    const vendas = await DB.db.vendas.where('clienteId').equals(c.id).toArray();
-    const diariasIds = [...new Set(vendas.map((v) => v.diariaId))];
+    const todasVendas = await DB.db.vendas.where('clienteId').equals(c.id).toArray();
+    const vendas = todasVendas.filter((v) => !v.tipoSaida);
+    const saidas = todasVendas.filter((v) => v.tipoSaida);
+    const diariasIds = [...new Set(todasVendas.map((v) => v.diariaId))];
     const diarias = await DB.db.diarias.bulkGet(diariasIds);
     const dataPor = new Map(diarias.map((d) => [d.id, d]));
     const produtos = await DB.db.produtos.toArray();
     const prodMap = new Map(produtos.map((p) => [p.id, p]));
+    const categ = await DB.db.categoriasSaida.toArray();
+    const catMap = new Map(categ.map((x) => [x.id, x]));
     const total = vendas.reduce((s, v) => s + v.unidades * v.valorUnitCentavos, 0);
+    const totalSaidas = saidas.reduce((s, v) => s + v.unidades * v.valorUnitCentavos, 0);
     const porData = new Map();
     for (const v of vendas) {
       const key = v.diariaId;
@@ -1034,6 +1119,17 @@
         </div>
       </div>
       ${cardVisita}
+      ${saidas.length ? `
+        <div class="card">
+          <div class="card-top"><h3>📝 Saídas (defeito/demo/grátis)</h3><b>${U.fmtMoeda(totalSaidas)}</b></div>
+          ${saidas.slice().reverse().map((v) => `
+            <div class="item-lista div">
+              <div>${v.unidades} × ${U.esc((prodMap.get(v.produtoId) || {}).nome || 'Removido')}
+                <br><small class="tag saida-tag">${U.esc((catMap.get(v.tipoSaida) || {}).nome || 'Saída')}</small>
+                <small class="muted"> · ${U.fmtData((dataPor.get(v.diariaId) || {}).data)}</small></div>
+              <small class="muted">${U.fmtMoeda(v.unidades * v.valorUnitCentavos)}</small>
+            </div>`).join('')}
+        </div>` : ''}
       ${ordenadas.map(([did, vs]) => {
         const d = dataPor.get(did);
         const tot = vs.reduce((s, v) => s + v.unidades * v.valorUnitCentavos, 0);
@@ -1244,7 +1340,7 @@
               : '<span class="thumb-produto sem-foto">🛒</span>'}
             <div onclick="App.formProduto(${p.id})" style="flex:1">
               <b>${U.esc(p.nome)}</b>${p.ativo ? '' : ' <span class="tag off">inativo</span>'}
-              <br><small class="muted">${U.fmtMoeda(p.precoCentavos)}${p.gramatura ? ' · ' + U.esc(p.gramatura) + 'g' : ''} · caixa ${p.unidPorCaixa} un · ganho ${U.fmtMoeda(p.comissaoCentavos)}/un</small>
+              <br><small class="muted">${U.fmtMoeda(p.precoCentavos)}${p.gramatura ? ' · ' + U.esc(p.gramatura) + 'g' : ''} · kit ${p.unidPorCaixa} un · ganho ${U.fmtMoeda(p.comissaoCentavos)}/un</small>
             </div>
             ${usados.has(p.id)
               ? `<button class="link danger" onclick="App.toggleProduto(${p.id},${p.ativo ? 0 : 1})">${p.ativo ? 'desativar' : 'ativar'}</button>`
@@ -1276,8 +1372,9 @@
       <label class="field"><span>Descrição</span><input name="descricao" value="${U.esc(p.descricao || '')}" placeholder="Ex: Pacote de 300g"></label>
       <div class="grid-2">
         <label class="field"><span>Gramatura (g)</span><input name="gramatura" type="number" step="1" min="0" value="${U.esc(p.gramatura || '')}" inputmode="numeric" placeholder="Ex: 400 (opcional)"></label>
-        <label class="field"><span>Unidades por caixa *</span><input name="unid" type="number" step="1" min="1" value="${p.unidPorCaixa}"></label>
+        <label class="field"><span>Itens por kit/caixa *</span><input name="unid" type="number" step="1" min="1" value="${p.unidPorCaixa}"></label>
       </div>
+      <p class="muted small" style="margin: -6px 0 0">Na venda você escolhe se vende por unidade ou por kit/caixa. O valor do kit é unitário × itens.</p>
       <div class="grid-2">
         <label class="field"><span>Preço de venda (R$) *</span><input name="preco" type="number" step="0.01" min="0" value="${(p.precoCentavos / 100).toFixed(2)}"></label>
         <label class="field"><span>Sua comissão/un (R$)</span><input name="comissao" type="number" step="0.01" min="0" value="${(p.comissaoCentavos / 100).toFixed(2)}"></label>
@@ -1365,15 +1462,7 @@
   }
 
   async function excluirProduto(id) {
-    const r = await U.promptDialog(
-      'Excluir produto',
-      `<label class="field"><span>Senha de exclusão</span>
-        <input name="senha" type="password" inputmode="numeric" autocomplete="off" placeholder="••••••"></label>`,
-      'Continuar'
-    );
-    if (!r) return;
-    const senhaVálida = await senhaExclusaoConfere(r.senha);
-    if (!senhaVálida) return U.toast('Senha incorreta.', 'erro');
+    if (!(await garantirSenhaParaExcluir())) return;
     const ok = await U.confirmar('Excluir produto', 'Excluir permanentemente? Só é possível se nunca foi usado.', 'Excluir');
     if (!ok) return;
     await DB.db.produtos.delete(id);
@@ -1382,7 +1471,7 @@
 
   async function renderRelatorios(el) {
     if (!state.mes) state.mes = U.mesAtualISO();
-    const { diarias, resumo, clientesById } = await Relatorios.dadosDoPeriodo(state.mes);
+    const { diarias, resumo, saidas, clientesById } = await Relatorios.dadosDoPeriodo(state.mes);
     el.innerHTML = `
       <label class="field mes-picker"><span>Mês</span>
         <input type="month" value="${state.mes}" onchange="App.trocarMes(this.value)">
@@ -1412,6 +1501,22 @@
           </div>`).join('') : '<p class="muted">Sem dados.</p>'}
       </div>
       <div class="card">
+        <div class="card-top"><h3>Saídas (defeito/demo/grátis)</h3>
+          <button class="link" onclick="App.exportarCsvSaidas()">⬇ CSV</button></div>
+        ${saidas && saidas.porCategoria.length ? `
+          <div class="mini-stats">
+            <div><span>${saidas.porCategoria.length}</span><small>Categorias</small></div>
+            <div><span>${saidas.totalUnidades}</span><small>Unidades</small></div>
+            <div><span>${U.fmtMoeda(saidas.totalCentavos)}</span><small>Valor</small></div>
+          </div>
+          <table class="tabela">
+            <tr><th>Categoria</th><th>Unids</th><th>Total</th></tr>
+            ${saidas.porCategoria.map((c) => `
+              <tr><td>${U.esc(c.nome)}</td><td>${c.unidades}</td><td>${U.fmtMoeda(c.totalCentavos)}</td></tr>`).join('')}
+          </table>`
+        : '<p class="muted">Nenhuma saída registrada neste mês.</p>'}
+      </div>
+      <div class="card">
         <h3>Diárias do mês</h3>
         ${diarias.length ? diarias.slice().reverse().map((d) => `
           <button class="item-lista" onclick="App.verDia(${d.id})">
@@ -1433,6 +1538,12 @@
     U.toast('CSV gerado!');
   }
 
+  async function exportarCsvSaidas() {
+    const csv = await Relatorios.csvSaidasDoMes(state.mes);
+    Backup._baixar(csv, `saidas-${state.mes}.csv`, 'text/csv;charset=utf-8');
+    U.toast('CSV de saídas gerado!');
+  }
+
   async function fazerBackup() {
     await Backup.exportarArquivo();
     U.toast('Backup baixado! Guarde com carinho 💾');
@@ -1449,6 +1560,7 @@
     const whatsapp = await DB.getConfig('vendedorWhatsapp');
     const ultimo = await DB.getConfig('ultimoBackupArquivo');
     const snaps = await Backup.listarSnapshots();
+    const categorias = await DB.db.categoriasSaida.toArray();
     el.innerHTML = `
       <div class="card">
         <h3>Perfil</h3>
@@ -1468,6 +1580,20 @@
         <label class="field"><span>Nova senha</span>
           <input type="password" inputmode="numeric" autocomplete="off" onchange="App.salvarSenhaExclusao(this.value)" placeholder="●●●●●●">
         </label>
+      </div>
+      <div class="card">
+        <div class="card-top"><h3>📝 Categorias de saída</h3>
+          <button class="link" onclick="App.novaCategoriaSaida()">+ nova</button></div>
+        <p class="muted small">Tipos de saída que não geram comissão (defeito, demonstração, dado de graça...). Aparecem na venda e no relatório de saídas.</p>
+        ${categorias.map((c) => `
+          <div class="item-lista div">
+            <div><b>${U.esc(c.nome)}</b>${c.ativo ? '' : ' <span class="tag off">inativa</span>'}</div>
+            <div>
+              <button class="link" onclick="App.editarCategoriaSaida(${c.id})">editar</button>
+              <button class="link danger" onclick="App.toggleCategoriaSaida(${c.id},${c.ativo ? 0 : 1})">${c.ativo ? 'desativar' : 'ativar'}</button>
+              <button class="link danger" onclick="App.excluirCategoriaSaida(${c.id})">excluir</button>
+            </div>
+          </div>`).join('')}
       </div>
       <div class="card">
         <h3>💾 Backup em arquivo</h3>
@@ -1529,6 +1655,53 @@
     U.toast('Senha de exclusão atualizada! 🔒');
   }
 
+  async function novaCategoriaSaida() {
+    const r = await U.promptDialog(
+      'Nova categoria de saída',
+      `<label class="field"><span>Nome</span><input name="nome" placeholder="Ex: Troca, Amostra..."></label>
+       <p class="muted small">Usada na aba Vendas e no relatório de saídas.</p>`,
+      'Criar'
+    );
+    if (!r) return;
+    if (!r.nome.trim()) return U.toast('Informe um nome.', 'erro');
+    await DB.db.categoriasSaida.add({ nome: r.nome.trim(), ativo: 1, criadoEm: Date.now() });
+    U.toast('Categoria criada! ✅');
+    render();
+  }
+
+  async function editarCategoriaSaida(id) {
+    const c = await DB.db.categoriasSaida.get(id);
+    if (!c) return;
+    const r = await U.promptDialog(
+      'Renomear categoria',
+      `<label class="field"><span>Nome</span><input name="nome" value="${U.esc(c.nome)}"></label>`,
+      'Salvar'
+    );
+    if (!r) return;
+    if (!r.nome.trim()) return U.toast('Informe um nome.', 'erro');
+    await DB.db.categoriasSaida.update(id, { nome: r.nome.trim() });
+    render();
+  }
+
+  async function toggleCategoriaSaida(id, novoStatus) {
+    await DB.db.categoriasSaida.update(id, { ativo: novoStatus });
+    render();
+  }
+
+  async function excluirCategoriaSaida(id) {
+    if (!(await garantirSenhaParaExcluir())) return;
+    const c = await DB.db.categoriasSaida.get(id);
+    const usada = await DB.db.vendas.filter((v) => v.tipoSaida === id).count();
+    const aviso =
+      usada > 0
+        ? `<br><small class="muted">Esta categoria tem ${usada} lançamento(s). A exclusão não apaga o histórico destes lançamentos (eles ficam como "Saída").</small>`
+        : '';
+    const ok = await U.confirmar('Excluir categoria', `Excluir <b>${U.esc(c ? c.nome : '')}</b>?${aviso}`, 'Excluir');
+    if (!ok) return;
+    await DB.db.categoriasSaida.delete(id);
+    render();
+  }
+
   async function exportarPdfCliente(clienteId) {
     try {
       const cliente = await DB.db.clientes.get(clienteId);
@@ -1578,14 +1751,15 @@
   root.App = {
     init, go, abrirDiaria, verDia, setDiaTab,
     salvarCarga, apagarCarga,
-    stepper, setQtd, trocarClienteSel, registrarVenda, apagarVenda, confirmarEntrega, desfazerEntrega,
+    stepper, setQtd, trocarClienteSel, setTipoSaida, setEmCaixa, registrarVenda, apagarVenda, confirmarEntrega, desfazerEntrega,
     salvarDevolucoes, apagarDevolucao,
     fecharDia, reabrirDia, copiarResumo, compartilharFornecedor, whatsappFornecedor, copiarFornecedor,
     excluirDiaria,
     buscar, formCliente, toggleCliente, excluirCliente,
     registrarVisita, setAcompFiltro, setAcompOrdena,
     formProduto, toggleProduto, excluirProduto, verImagemProduto,
-    trocarMes, exportarCsv,
+    trocarMes, exportarCsv, exportarCsvSaidas,
+    novaCategoriaSaida, editarCategoriaSaida, toggleCategoriaSaida, excluirCategoriaSaida,
     fazerBackup, importarBackup, salvarNome, salvarEmpresa, salvarWhatsapp, salvarSenhaExclusao, exportarPdfCliente, snapshotAgora, restaurarSnapshot, excluirSnapshot,
     get state() { return state; },
   };

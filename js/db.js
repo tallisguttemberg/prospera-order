@@ -38,6 +38,29 @@
     visitas: '++id, clienteId, data',
   });
 
+  db.version(4).stores({
+    produtos: '++id, nome, ativo',
+    clientes: '++id, nome, ativo',
+    diarias: '++id, &data, status',
+    cargas: '++id, diariaId, produtoId',
+    vendas: '++id, diariaId, clienteId, produtoId',
+    devolucoes: '++id, diariaId, produtoId',
+    snapshots: '++id, criadoEm',
+    config: 'chave',
+    visitas: '++id, clienteId, data',
+    categoriasSaida: '++id, nome, ativo',
+  }).upgrade(async (tx) => {
+    const existe = await tx.table('categoriasSaida').count();
+    if (existe === 0) {
+      const agora = Date.now();
+      await tx.table('categoriasSaida').bulkAdd([
+        { nome: 'Com defeito', tipo: 'fixa', ativo: 1, criadoEm: agora },
+        { nome: 'Demonstração', tipo: 'fixa', ativo: 1, criadoEm: agora },
+        { nome: 'Dado de graça', tipo: 'fixa', ativo: 1, criadoEm: agora },
+      ]);
+    }
+  });
+
   db.on('populate', async () => {
     await db.produtos.bulkAdd([
       {
@@ -65,7 +88,16 @@
     await db.config.put({ chave: 'vendedorWhatsapp', valor: '' });
     await db.config.put({ chave: 'senhaExclusao', valor: '' });
     await db.config.put({ chave: 'ultimoBackupArquivo', valor: null });
+    await db.categoriasSaida.bulkAdd([
+      { nome: 'Com defeito', tipo: 'fixa', ativo: 1, criadoEm: Date.now() },
+      { nome: 'Demonstração', tipo: 'fixa', ativo: 1, criadoEm: Date.now() },
+      { nome: 'Dado de graça', tipo: 'fixa', ativo: 1, criadoEm: Date.now() },
+    ]);
   });
+
+  async function categoriasSaidaAtivas() {
+    return db.categoriasSaida.where('ativo').equals(1).sortBy('nome');
+  }
 
   async function getConfig(chave) {
     const r = await db.config.get(chave);
@@ -100,5 +132,6 @@
     diariaAberta,
     dadosDiaria,
     produtosAtivos,
+    categoriasSaidaAtivas,
   };
 })(self);

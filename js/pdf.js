@@ -122,14 +122,21 @@
     const prodMap = new Map(produtos.map((p) => [p.id, p]));
 
     for (const v of vendas) {
-      const nome = (prodMap.get(v.produtoId) || {}).nome || 'Produto removido';
+      const p = prodMap.get(v.produtoId);
+      const nome = (p || {}).nome || 'Produto removido';
       const sub = v.unidades * v.valorUnitCentavos;
-      totalGeral += sub;
+      totalGeral += v.tipoSaida ? 0 : sub;
 
-      doc.text(String(v.unidades), colQtd + 1, y);
+      let qtdLabel = String(v.unidades);
+      if (root.Calc && p && !v.tipoSaida) {
+        const exib = root.Calc.exibirQtd(v.unidades, p, v.emCaixa);
+        if (exib.rotulo) qtdLabel = exib.rotulo;
+      }
+
+      doc.text(String(qtdLabel), colQtd + 1, y);
       doc.text(String(nome), colProd + 1, y);
-      doc.text(fmtMoedaBRL(v.valorUnitCentavos), colUnit + 1, y);
-      doc.text(fmtMoedaBRL(sub), colTotal + 1, y);
+      doc.text(fmtMoedaBRL(v.tipoSaida ? 0 : v.valorUnitCentavos), colUnit + 1, y);
+      doc.text(fmtMoedaBRL(v.tipoSaida ? 0 : sub), colTotal + 1, y);
       y += 5;
 
       if (y > 270) {

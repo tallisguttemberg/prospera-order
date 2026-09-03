@@ -72,4 +72,57 @@ teste('resumoPeriodo agrega faturamento, ganho, ranking de clientes/produtos', (
   assert.strictEqual(r.porCliente[0].clienteId, 1);
 });
 
+teste('resumoPeriodo ignora vendas com tipoSaida no faturamento/ganho', () => {
+  const diarias = [{ id: 10, data: '2026-08-01' }];
+  const vendas = {
+    10: [
+      { clienteId: 1, produtoId: 1, unidades: 10, valorUnitCentavos: 700, comissaoUnitCentavos: 50 },
+      { clienteId: 2, produtoId: 1, unidades: 5, valorUnitCentavos: 700, comissaoUnitCentavos: 0, tipoSaida: 1 },
+    ],
+  };
+  const r = Calc.resumoPeriodo(diarias, (id) => vendas[id], new Map([[1, { nome: 'Sorda' }]]));
+  assert.strictEqual(r.faturamentoCentavos, 7000);
+  assert.strictEqual(r.ganhoCentavos, 500);
+  assert.strictEqual(r.diasComVenda, 1);
+  assert.strictEqual(r.porProduto[0].unidades, 10);
+});
+
+teste('exibirQtd mostra caixa/kit quando emCaixa=true e unidade quando false', () => {
+  const p = { unidPorCaixa: 20 };
+  assert.deepStrictEqual(Calc.exibirQtd(43, p, true),
+    { rotulo: '2 caixas + 3 un', caixas: 2, avulsas: 3 });
+  assert.deepStrictEqual(Calc.exibirQtd(20, p, true),
+    { rotulo: '1 caixa', caixas: 1, avulsas: 0 });
+  assert.deepStrictEqual(Calc.exibirQtd(13, p, false),
+    { rotulo: '13 un', caixas: 0, avulsas: 13 });
+  assert.deepStrictEqual(Calc.exibirQtd(13, p, undefined),
+    { rotulo: '13 un', caixas: 0, avulsas: 13 });
+});
+
+teste('precoCaixaCentavos calcula unitario x qtd na caixa', () => {
+  assert.strictEqual(Calc.precoCaixaCentavos({ precoCentavos: 700, unidPorCaixa: 20 }), 14000);
+  assert.strictEqual(Calc.precoCaixaCentavos({ precoCentavos: 1200, unidPorCaixa: 24 }), 28800);
+  assert.strictEqual(Calc.precoCaixaCentavos({ precoCentavos: 500, unidPorCaixa: 1 }), null);
+});
+
+teste('resumoSaidasPeriodo agrega por categoria, cliente e produto', () => {
+  const diarias = [{ id: 10, data: '2026-08-01' }];
+  const vendas = {
+    10: [
+      { clienteId: 1, produtoId: 1, unidades: 5, valorUnitCentavos: 700, comissaoUnitCentavos: 0, tipoSaida: 101 },
+      { clienteId: 2, produtoId: 2, unidades: 2, valorUnitCentavos: 1200, comissaoUnitCentavos: 0, tipoSaida: 102 },
+      { clienteId: 1, produtoId: 1, unidades: 3, valorUnitCentavos: 700, comissaoUnitCentavos: 0, tipoSaida: 101 },
+    ],
+  };
+  const categ = new Map([[101, { nome: 'Defeito' }], [102, { nome: 'Demo' }]]);
+  const r = Calc.resumoSaidasPeriodo(diarias, (id) => vendas[id], new Map([[1, { nome: 'Sorda' }], [2, { nome: 'Bolo' }]]), categ);
+  assert.strictEqual(r.totalUnidades, 10);
+  assert.strictEqual(r.totalCentavos, (5 * 700) + (2 * 1200) + (3 * 700));
+  const def = r.porCategoria.find((c) => c.nome === 'Defeito');
+  assert.strictEqual(def.unidades, 8);
+  assert.strictEqual(def.totalCentavos, 8 * 700);
+  const cli1 = r.porCliente.find((c) => c.clienteId === 1);
+  assert.strictEqual(cli1.unidades, 8);
+});
+
 console.log(`\n${passou} testes passaram.`);
